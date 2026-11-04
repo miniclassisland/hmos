@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "MINI ClassIsland Control Application"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "MINI ClassIsland Control Console & Governance"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "MINI ClassIsland"
+    }
+  ]
+}
