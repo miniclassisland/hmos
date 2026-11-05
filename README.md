@@ -1,5 +1,12 @@
 # MINI ClassIsland — HarmonyOS Next 原生集控客户端
 
+<p align="center">
+  <a href="https://miniclassisland.com" target="_blank" rel="noopener noreferrer">
+    <img src="assets/miniclassisland.png" alt="MINI ClassIsland Logo" width="128" height="128" />
+  </a>
+</p>
+
+
 **MINI ClassIsland HarmonyOS**（包名：`org.miniopensource.miniclassisland`）是基于 **ArkTS + ArkUI 声明式框架（HarmonyOS Next API 12+）** 构建的原生鸿蒙多设备集控与平台治理客户端。
 
 ---
