@@ -1,15 +1,26 @@
+node_modules/
 /node_modules
+oh_modules/
 /oh_modules
+.hvigor/
 /.hvigor
+.preview/
 /.preview
-/.idea
+build/
 /build
 entry/build/
 local.properties
+
+# DevEco Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+
+# Compilation outputs
 *.har
 *.hap
 *.app
-.cxx
+.cxx/
 
 # HarmonyOS signing keys & certificates
 *.p12
@@ -22,14 +33,27 @@ local.properties
 *.p8
 *.snk
 *.crt
+*.der
 *id_rsa*
 *id_ed25519*
 *id_ecdsa*
 *id_dsa*
+
+# Environment & Config
 .env*
 !.env.example
+config.json
+config.*.json
+
+# OS & Temp
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+*.bak
 *.log
 *.db
 *.sqlite*
-Thumbs.db
-desktop.ini
+.temp/
