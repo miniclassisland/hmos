@@ -199,7 +199,7 @@ export struct SecurityAndAdminView {
         }
         .width('100%')
 
-        Text('验证登录密码与两步验证码后签发一张有效期 7 天的登录安全证书，并生成 5 分钟单次兑换码与 DeepLink (miniclassisland://exchange-certificate/{Code})。客户端使用安全证书可随时申请不超过 1 小时的管理会话令牌，剩余有效期低于 24 小时时可自动轮换下一代（最多 12 代）。')
+        Text('验证登录密码与两步验证码后签发一张有效期 7 天的登录安全证书，并生成 5 分钟单次兑换码与深链接。客户端使用安全证书可随时申请不超过 1 小时的管理会话令牌，剩余有效期低于 24 小时时可自动轮换下一代（最多 12 代）。')
           .fontSize(12)
           .fontColor(this.theme().textSecondary)
           .lineHeight(18)
@@ -400,7 +400,7 @@ export struct SecurityAndAdminView {
             ForEach(this.activeCertList, (cert: Record<string, Object>) => {
               Row({ space: 8 }) {
                 Column({ space: 2 }) {
-                  Text(`${String(cert['device_name'] || '客户端')} · ID: ${String(cert['cert_id'] || '')}`)
+                  Text(`${String(cert['device_name'] || '客户端')}`)
                     .fontSize(13)
                     .fontWeight(FontWeight.Medium)
                     .fontColor(this.theme().textPrimary)
@@ -446,7 +446,7 @@ export struct SecurityAndAdminView {
       Column({ space: 12 }) {
         Row({ space: 6 }) {
           HmosSymbolIcon($r('sys.symbol.qrcode'), 16, this.theme().accentColor)
-          Text('扫码登录网页端 (miniclassisland://qr-login/{Code})')
+          Text('扫码登录网页端')
             .fontSize(15)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.theme().textPrimary)

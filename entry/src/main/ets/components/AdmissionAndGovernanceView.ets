@@ -307,7 +307,7 @@ export struct AdmissionAndGovernanceView {
         .width('100%')
 
         Row({ space: 8 }) {
-          TextInput({ placeholder: '设备备注（如 高一1班一体机）', text: this.newPreLabel })
+          TextInput({ placeholder: '设备备注', text: this.newPreLabel })
             .height(34)
             .fontSize(12)
             .fontColor(this.theme().textPrimary)

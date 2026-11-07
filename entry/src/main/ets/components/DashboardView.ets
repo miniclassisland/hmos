@@ -57,7 +57,7 @@ export struct DashboardView {
     Column({ space: 16 }) {
       if (this.isSuperAdminTakeover) {
         Row({ space: 8 }) {
-          Text(`当前正在以超级管理员身份接管集控账户：${this.currentAccountName} (#${this.currentAccountId})`)
+          Text(`当前正在以超级管理员身份接管集控账户：${this.currentAccountName}`)
             .fontSize(13)
             .fontColor(this.theme().badgeWarningFg)
             .layoutWeight(1)

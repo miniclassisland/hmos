@@ -223,7 +223,7 @@ export struct AuthAndAccountView {
   private async handleAuthorizeQrWebLogin(): Promise<void> {
     const raw = this.qrLoginCodeInput.trim();
     if (!raw) {
-      this.authError = '请输入或扫描网页端登录二维码链接 (miniclassisland://qr-login/...)';
+      this.authError = '请输入或扫描网页端登录二维码链接';
       return;
     }
     this.authError = '';
@@ -297,7 +297,7 @@ export struct AuthAndAccountView {
       Column({ space: 8 }) {
         Row({ space: 6 }) {
           HmosSymbolIcon($r('sys.symbol.checkmark_shield'), 15, this.theme().accentColor)
-          Text('登录安全证书 (免密快速签发 1 小时会话令牌)')
+          Text('登录安全证书')
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.theme().textPrimary)
@@ -316,7 +316,7 @@ export struct AuthAndAccountView {
             Row({ space: 6 }) {
               HmosIconTextButton(
                 $r('sys.symbol.checkmark_shield'),
-                '用安全证书直接登录 (1小时Token)',
+                '用安全证书直接登录',
                 '#FFFFFF',
                 this.theme().accentColor,
                 Color.Transparent,

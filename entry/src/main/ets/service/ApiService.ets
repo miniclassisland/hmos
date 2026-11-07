@@ -106,7 +106,7 @@ export class ApiService {
 
       if (httpRes.responseCode === 503 && String(parsed['code'] || '') === 'ERR_SYSTEM_OOBE') {
         res.isOobe = true;
-        res.error = '系统尚未完成初始化配置 (OOBE)';
+        res.error = '系统尚未完成初始化配置';
         return res;
       }
 
@@ -119,7 +119,7 @@ export class ApiService {
         res.ok = true;
         res.data = parsed;
       } else {
-        res.error = String(parsed['message'] || parsed['error'] || `请求失败 (${httpRes.responseCode})`);
+        res.error = String(parsed['message'] || parsed['error'] || '请求失败');
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : JSON.stringify(err);

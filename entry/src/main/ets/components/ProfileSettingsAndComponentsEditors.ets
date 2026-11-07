@@ -248,17 +248,17 @@ export struct ProfileSettingsAndComponentsEditors {
           .borderRadius(10)
           .border({ width: 2, color: this.theme().borderColor })
 
-          this.buildNumberField('水平停靠偏移量 (X)', 'WindowDockingOffsetX', 0)
-          this.buildNumberField('垂直停靠偏移量 (Y)', 'WindowDockingOffsetY', 0)
-          this.buildNumberField('窗口层级 (0=置底, 1=置顶)', 'WindowLayer', 1)
+          this.buildNumberField('水平停靠偏移量', 'WindowDockingOffsetX', 0)
+          this.buildNumberField('垂直停靠偏移量', 'WindowDockingOffsetY', 0)
+          this.buildNumberField('窗口层级', 'WindowLayer', 1)
           this.buildNumberField('目标显示器索引', 'WindowDockingMonitorIndex', 0)
           this.buildSwitchItem('启用鼠标穿透点击', '鼠标点击穿过主界面到达底层窗口', 'IsMouseClickingThroughEnabled', false)
         }.width('100%')
       } else if (this.settingsTab === 'appearance') {
         Column({ space: 6 }) {
-          this.buildNumberField('明暗主题 (0=系统, 1=浅色, 2=深色)', 'Theme', 0)
+          this.buildNumberField('明暗主题', 'Theme', 0)
           this.buildNumberField('全局界面缩放比例', 'Scale', 1.0)
-          this.buildNumberField('背景不透明度 (0~1)', 'Opacity', 0.85)
+          this.buildNumberField('背景不透明度', 'Opacity', 0.85)
           this.buildNumberField('主界面圆角半径', 'Radius', 8)
           this.buildNumberField('组件行间距', 'MainWindowLineVerticalMargin', 4)
           this.buildStringField('自定义主字体名称', 'MainWindowFont', 'HarmonyOS Sans SC')
@@ -269,14 +269,14 @@ export struct ProfileSettingsAndComponentsEditors {
         }.width('100%')
       } else if (this.settingsTab === 'Wallpaper') {
         Column({ space: 6 }) {
-          this.buildNumberField('主题色来源 (0=自选, 1=系统壁纸)', 'ColorSource', 0)
+          this.buildNumberField('主题色来源', 'ColorSource', 0)
           this.buildStringField('主色调颜色值', 'PrimaryColor', '#0078D4')
           this.buildStringField('次色调颜色值', 'SecondaryColor', '#2B88D8')
           this.buildNumberField('壁纸取色自动刷新间隔 (秒)', 'WallpaperAutoUpdateIntervalSeconds', 60)
         }.width('100%')
       } else if (this.settingsTab === 'hide') {
         Column({ space: 6 }) {
-          this.buildNumberField('隐藏策略模式 (0=不隐藏, 1=上课隐藏, 2=全屏隐藏)', 'HideMode', 0)
+          this.buildNumberField('隐藏策略模式', 'HideMode', 0)
           this.buildSwitchItem('上课时自动隐藏主界面', '进入上课时间段时自动收起顶栏', 'HideOnClass', false)
           this.buildSwitchItem('前台全屏程序时自动隐藏', '检测到全屏应用或演示文稿时隐藏', 'HideOnFullscreen', false)
           this.buildSwitchItem('前台窗口最大化时自动隐藏', '检测到最大化窗口时隐藏', 'HideOnMaxWindow', false)
@@ -286,19 +286,19 @@ export struct ProfileSettingsAndComponentsEditors {
           this.buildSwitchItem('启用全局提醒通知', '允许显示课堂与集控横幅提醒', 'IsNotificationEnabled', true)
           this.buildSwitchItem('启用提醒醒目动画特效', '展示全屏波纹与横幅过渡动画', 'IsNotificationEffectEnabled', true)
           this.buildSwitchItem('启用提醒提示音效', '播放上下课与通知提示音', 'IsNotificationSoundEnabled', true)
-          this.buildNumberField('通知音效音量 (0~1)', 'NotificationSoundVolume', 1.0)
+          this.buildNumberField('通知音效音量', 'NotificationSoundVolume', 1.0)
           this.buildSwitchItem('提醒期间强制置顶主窗口', '通知展示时置于屏幕最顶层', 'IsNotificationTopmostEnabled', true)
         }.width('100%')
       } else if (this.settingsTab === 'speech') {
         Column({ space: 6 }) {
           this.buildSwitchItem('启用语音播报', '使用语音引擎朗读通知内容', 'IsSpeechEnabled', true)
-          this.buildNumberField('语音引擎 (0=系统, 1=EdgeTTS, 2=GPT-SoVITS)', 'SpeechSource', 0)
-          this.buildNumberField('语音播报音量 (0~1)', 'SpeechVolume', 1.0)
+          this.buildNumberField('语音引擎', 'SpeechSource', 0)
+          this.buildNumberField('语音播报音量', 'SpeechVolume', 1.0)
           this.buildStringField('EdgeTTS 发音人标识', 'EdgeTtsVoiceName', 'zh-CN-XiaoxiaoNeural')
         }.width('100%')
       } else if (this.settingsTab === 'weather') {
         Column({ space: 6 }) {
-          this.buildStringField('城市编码 (CityId)', 'CityId', '101010100')
+          this.buildStringField('城市编码', 'CityId', '101010100')
           this.buildStringField('城市名称', 'CityName', '北京')
           this.buildNumberField('气象数据自动刷新分钟数', 'WeatherAutoRefreshIntervalMinutes', 30)
           this.buildSwitchItem('启用气象灾害预警弹窗提醒', '收到极端天气预警时自动弹窗', 'IsWeatherAlertEnabled', true)
@@ -315,7 +315,7 @@ export struct ProfileSettingsAndComponentsEditors {
         }.width('100%')
       } else if (this.settingsTab === 'update') {
         Column({ space: 6 }) {
-          this.buildNumberField('更新模式 (0=不检查, 1=仅提示, 2=自动下载, 3=自动安装)', 'UpdateMode', 1)
+          this.buildNumberField('更新模式', 'UpdateMode', 1)
           this.buildStringField('更新通道标识', 'SelectedUpdateChannelV2', 'stable')
         }.width('100%')
       } else if (this.settingsTab === 'storage') {
@@ -340,7 +340,7 @@ export struct ProfileSettingsAndComponentsEditors {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.theme().accentColor)
           Row({ space: 8 }) {
-            TextInput({ placeholder: '可选预设班级标识（如 高一1班）', text: this.presetClassIdentity })
+            TextInput({ placeholder: '可选预设班级标识', text: this.presetClassIdentity })
               .height(34).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
               .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
               .onChange((v: string) => { this.presetClassIdentity = v; })
@@ -597,7 +597,7 @@ export struct ProfileSettingsAndComponentsEditors {
           // 4 Right-Pane Inspector Tabs: 组件库 | 组件设置 | 高级外观设置 | 布局与行配置
           Flex({ wrap: FlexWrap.Wrap }) {
             ForEach([
-              ['lib', '组件库 (11内置)'],
+              ['lib', '组件库'],
               ['settings', '组件专属设置'],
               ['advanced', '高级外观与宽度'],
               ['layout', '岛分离与行布局']
@@ -670,7 +670,7 @@ export struct ProfileSettingsAndComponentsEditors {
             }
           } else {
             Column({ space: 6 }) {
-              Text('组件行岛分离模式 (0=继承全局, 1=合并单岛, 2=按对齐分岛)')
+              Text('组件行岛分离模式')
                 .fontSize(12).fontColor(this.theme().textPrimary)
               Row({ space: 6 }) {
                 ForEach([0, 1, 2], (mode: number) => {
@@ -747,7 +747,7 @@ export struct ProfileSettingsAndComponentsEditors {
             })
         }.width('100%')
         Row({ space: 6 }) {
-          Text('目标日期 (YYYY-MM-DD):').fontSize(12).fontColor(this.theme().textPrimary)
+          Text('目标日期:').fontSize(12).fontColor(this.theme().textPrimary)
           TextInput({ text: String(((comp['Settings'] || {}) as Record<string, Object>)['OverTime'] || '2026-06-07') })
             .height(32).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
             .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
