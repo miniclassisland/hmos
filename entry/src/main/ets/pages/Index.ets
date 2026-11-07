@@ -1,14 +1,14 @@
 import {
   UserInfo,
   AccountSummary,
-  ClientRecord,
-  PairingRequestItem,
-  AuditLogItem,
   AdminAccountItem,
   GlobalStats
 } from '../model/Types';
 import { WebThemePalette, getWebPalette } from '../model/Theme';
 import { ApiService } from '../service/ApiService';
+import { HmosIconButton, HmosSymbolIcon } from '../components/HmosIcons';
+import { AuthAndAccountView } from '../components/AuthAndAccountView';
+import { DashboardView } from '../components/DashboardView';
 import { ProfileEditorView } from '../components/ProfileEditorView';
 import { ClientsAndOpsView } from '../components/ClientsAndOpsView';
 import { AdmissionAndGovernanceView } from '../components/AdmissionAndGovernanceView';
@@ -39,67 +39,34 @@ struct Index {
   @StorageProp('decorHeightVp') decorHeightVp: number = 48;
   @StorageProp('captionRightReserveVp') captionRightReserveVp: number = 0;
 
-  // Theme Mode ('system' | 'light' | 'dark') matching Web ThemeModeToggle
+  // DeepLink state synced from EntryAbility
+  @StorageLink('pendingCertUri') @Watch('onPendingCertUriChanged') pendingCertUri: string = '';
+  @StorageLink('pendingQrLoginUri') @Watch('onPendingQrLoginUriChanged') pendingQrLoginUri: string = '';
+
   @State themeMode: string = 'light';
-
-  // Endpoint & Auth State (matching web/app/login/page.tsx)
-  @State managementEndpoint: string = 'https://api.miniclassisland.com';
-  @State adminEndpoint: string = 'https://admin.miniclassisland.com/api';
-  @State showEndpointConfig: boolean = false;
   @State isLoggedIn: boolean = false;
-  @State loginStep: string = 'email'; // 'email' | 'login' | 'register' | 'totp' | 'oobe'
-  @State useAdminAuthEndpoint: boolean = false;
-
-  @State emailInput: string = '';
-  @State loginUsername: string = '';
-  @State loginPassword: string = '';
-  @State regDisplayName: string = '';
-  @State totpSession: string = '';
-  @State totpCode: string = '';
-  @State totpUseRecovery: boolean = false;
-  @State authError: string = '';
-  @State authInfoMsg: string = '';
-  @State isSubmitting: boolean = false;
-
-  // OOBE Wizard State
-  @State oobePasscode: string = '';
-  @State oobeVerified: boolean = false;
-  @State oobePgUrl: string = 'postgres://postgres:postgres@localhost:5432/miniclassisland?sslmode=disable';
-  @State oobeRedisUrl: string = 'redis://localhost:6379/0';
-  @State oobeDomain: string = 'api.miniclassisland.com';
-  @State oobeAdminUser: string = 'admin';
-  @State oobeAdminEmail: string = 'admin@example.com';
-  @State oobeAdminPassword: string = '';
-
-  // Session & Multi-Tenant Context (matching web/app/page.tsx AccountListPage)
   @State currentUser: UserInfo | null = null;
   @State accounts: AccountSummary[] = [];
   @State currentAccountId: number = 0;
   @State currentAccountName: string = '';
   @State currentAccountSlug: string = '';
-  @State showCreateAccountDialog: boolean = false;
-  @State showJoinInviteDialog: boolean = false;
-  @State newTenantName: string = '';
-  @State newTenantSlug: string = '';
-  @State inviteCodeInput: string = '';
 
-  // AppShell Mode & Menus (matching web/components/TopBar.tsx & UserMenu.tsx & Sidebar.tsx)
   @State isSuperAdminMode: boolean = false;
   @State isSuperAdminTakeover: boolean = false;
   @State showUserMenuPopover: boolean = false;
   @State showMobileDrawer: boolean = false;
   @State currentSection: string = 'dashboard';
 
-  // Dashboard Metrics (matching web/app/dashboard/page.tsx)
+  // Dashboard Metrics
   @State dashOnlineClients: number = 0;
   @State dashTotalClients: number = 0;
   @State dashPendingPairings: number = 0;
   @State dashTotalResources: number = 0;
   @State dashRecentAudits: number = 0;
-  @State dashPresetJson: string = '';
   @State adminGlobalStats: GlobalStats | null = null;
 
-  // Exact 6 navigation sections from web/components/Sidebar.tsx
+  @State deepLinkBannerMsg: string = '';
+
   private tenantNavSections: NavMenuSection[] = [
     {
       title: '概览',
@@ -150,7 +117,6 @@ struct Index {
     }
   ];
 
-  // Exact SuperAdmin navigation from admin/components/AdminShell.tsx
   private superAdminNavItems: NavMenuItem[] = [
     { key: 'admin_dashboard', label: '全局仪表盘' },
     { key: 'admin_users', label: '全局用户管理' },
@@ -159,114 +125,60 @@ struct Index {
     { key: 'admin_settings', label: '系统参数设置' }
   ];
 
+  aboutToAppear(): void {
+    if (this.pendingCertUri && this.pendingCertUri.trim().length > 0) {
+      this.onPendingCertUriChanged();
+    }
+    if (this.pendingQrLoginUri && this.pendingQrLoginUri.trim().length > 0) {
+      this.onPendingQrLoginUriChanged();
+    }
+  }
+
   private theme(): WebThemePalette {
     return getWebPalette(this.themeMode);
   }
 
-  private async handleEmailCheck(): Promise<void> {
-    const trimmed = this.emailInput.trim();
-    if (trimmed.length === 0) {
+  private async onPendingCertUriChanged(): Promise<void> {
+    const uri = (this.pendingCertUri || '').trim();
+    if (!uri) {
       return;
     }
-    this.authError = '';
-    this.authInfoMsg = '';
-    this.isSubmitting = true;
-    ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-    const res = await ApiService.get().checkMailAvailability(trimmed);
-    this.isSubmitting = false;
-
-    if (res.isOobe) {
-      this.loginStep = 'oobe';
-      return;
-    }
-    if (!res.ok) {
-      // Fallback to direct login if endpoint check is unavailable or username was entered
-      this.loginUsername = trimmed;
-      this.loginStep = 'login';
-      return;
-    }
-    if (res.data === true) {
-      // Email is available -> go to register step
-      this.loginStep = 'register';
-    } else {
-      // Email already exists -> go to login step
-      this.loginUsername = trimmed;
-      this.loginStep = 'login';
-    }
-  }
-
-  private async handleLogin(): Promise<void> {
-    this.authError = '';
-    this.authInfoMsg = '';
-    this.isSubmitting = true;
-    ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-    const identifier = this.loginUsername.trim().length > 0 ? this.loginUsername.trim() : this.emailInput.trim();
-    const res = await ApiService.get().login(identifier, this.loginPassword, this.useAdminAuthEndpoint);
-    this.isSubmitting = false;
-
-    if (res.isOobe) {
-      this.loginStep = 'oobe';
-      return;
-    }
-    if (!res.ok || !res.data) {
-      this.authError = res.error || '登录失败';
-      return;
-    }
-    if (res.data.totp_required) {
-      this.totpSession = res.data.totp_session;
-      this.loginStep = 'totp';
-      return;
-    }
-    await this.onAuthSuccess(res.data.token, res.data.user);
-  }
-
-  private async handleRegister(): Promise<void> {
-    if (this.loginPassword.length < 12) {
-      this.authError = '密码长度至少为 12 个字符';
-      return;
-    }
-    this.authError = '';
-    this.isSubmitting = true;
-    ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-    const email = this.emailInput.trim();
-    const autoUsername = email.indexOf('@') > 0 ? email.split('@')[0] : email;
-    const r = await ApiService.get().registerUser(
-      autoUsername,
-      email,
-      this.loginPassword,
-      this.regDisplayName.trim()
-    );
-    this.isSubmitting = false;
-    if (r.ok) {
-      this.loginUsername = email;
-      this.loginStep = 'login';
-      this.authInfoMsg = '注册成功，请登录或等待超级管理员审核通过';
-    } else {
-      this.authError = r.error || '注册失败';
-    }
-  }
-
-  private async handleTotpVerify(): Promise<void> {
-    this.authError = '';
-    this.isSubmitting = true;
+    this.pendingCertUri = '';
     const api = ApiService.get();
-    const res = this.totpUseRecovery
-      ? await api.recoverTotp(this.totpSession, this.totpCode, this.useAdminAuthEndpoint)
-      : await api.verifyTotp(this.totpSession, this.totpCode, this.useAdminAuthEndpoint);
-    this.isSubmitting = false;
-
-    if (!res.ok || !res.data) {
-      this.authError = res.error || '验证失败';
+    const r = await api.redeemCertificate(uri);
+    if (!r.ok || !r.data) {
+      this.deepLinkBannerMsg = r.error || '通过 DeepLink 兑换登录安全证书失败';
       return;
     }
-    await this.onAuthSuccess(res.data.token, res.data.user);
+    const sRes = await api.requestSessionFromCertificate(3600);
+    if (sRes.ok) {
+      const pRes = await api.getProfile();
+      if (pRes.ok && pRes.data) {
+        await this.onAuthSuccess(api.token, pRes.data);
+        this.deepLinkBannerMsg = `已通过 DeepLink 下载安全证书并自动登录 (代数 ${r.data.generation}/${r.data.max_generation})`;
+      }
+    }
+  }
+
+  private async onPendingQrLoginUriChanged(): Promise<void> {
+    const uri = (this.pendingQrLoginUri || '').trim();
+    if (!uri) {
+      return;
+    }
+    this.pendingQrLoginUri = '';
+    const r = await ApiService.get().authorizeWebQrLogin(uri);
+    if (r.ok) {
+      this.deepLinkBannerMsg = '已通过扫码 DeepLink 成功授权网页端登录';
+    } else {
+      this.deepLinkBannerMsg = r.error || '网页端扫码登录授权失败';
+    }
   }
 
   private async onAuthSuccess(token: string, user: UserInfo): Promise<void> {
     ApiService.get().setToken(token);
     this.currentUser = user;
     this.isLoggedIn = true;
-    this.currentAccountId = 0; // Show Account Selection Page (/) first, matching web/app/page.tsx
+    this.currentAccountId = 0;
     await this.refreshAccountsList();
   }
 
@@ -329,9 +241,8 @@ struct Index {
     this.dashTotalResources = totalRes;
   }
 
-  // ==================== ThemeModeToggle (matches web/components/ThemeModeToggle.tsx) ====================
   @Builder
-  buildThemeModeToggle(onBlueBg: boolean) {
+  buildThemeModeToggle() {
     Row({ space: 2 }) {
       ForEach([
         ['system', '自动'],
@@ -341,18 +252,10 @@ struct Index {
         Text(item[1])
           .fontSize(12)
           .fontWeight(this.themeMode === item[0] ? FontWeight.Medium : FontWeight.Normal)
-          .fontColor(
-            this.themeMode === item[0]
-              ? (onBlueBg ? '#FFFFFF' : this.theme().accentColor)
-              : (onBlueBg ? '#E0E0E0' : this.theme().textSecondary)
-          )
+          .fontColor(this.themeMode === item[0] ? this.theme().accentColor : this.theme().textSecondary)
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
           .borderRadius(4)
-          .backgroundColor(
-            this.themeMode === item[0]
-              ? (onBlueBg ? '#33FFFFFF' : this.theme().bgAccentSubtle)
-              : Color.Transparent
-          )
+          .backgroundColor(this.themeMode === item[0] ? this.theme().bgAccentSubtle : Color.Transparent)
           .onClick(() => {
             this.themeMode = item[0];
           })
@@ -360,798 +263,27 @@ struct Index {
     }
     .padding(2)
     .borderRadius(6)
-    .backgroundColor(onBlueBg ? '#22000000' : this.theme().bgSubtle)
-    .border({ width: 1, color: onBlueBg ? '#44FFFFFF' : this.theme().borderColor })
+    .backgroundColor(this.theme().bgSubtle)
+    .border({ width: 1, color: this.theme().borderColor })
   }
 
-  // ==================== Footer Disclaimer (matches web/app/login/page.tsx & page.tsx) ====================
-  @Builder
-  buildWebFooterDisclaimer() {
-    Column({ space: 4 }) {
-      Divider().color(this.theme().borderColor).margin({ bottom: 12 })
-      Text('本项目与 ClassIsland 官方无关，ClassIsland 是由 ClassIsland 社区开发和维护的开源软件')
-        .fontSize(11)
-        .fontColor(this.theme().textSecondary)
-        .textAlign(TextAlign.Center)
-      Text('本项目由 MINIOpenSource 开发和维护，并开源在 GitHub')
-        .fontSize(11)
-        .fontColor(this.theme().textSecondary)
-        .textAlign(TextAlign.Center)
-    }
-    .width('100%')
-    .margin({ top: 20 })
-  }
-
-  // ==================== 1. Web Login Screen (/login) ====================
-  @Builder
-  buildLoginScreen() {
-    Stack({ alignContent: Alignment.TopEnd }) {
-      Scroll() {
-        Column() {
-          // Centered Login Card (width: 420, borderRadius: 12, padding: 32)
-          Column({ space: 14 }) {
-            // Logo & Title Header
-            Column({ space: 8 }) {
-              Image($r('app.media.app_icon'))
-                .width(64)
-                .height(64)
-                .borderRadius(12)
-                .margin({ bottom: 4 })
-              Text('欢迎来到 MINI ClassIsland')
-                .fontSize(22)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.theme().textPrimary)
-                .textAlign(TextAlign.Center)
-              Text(
-                this.loginStep === 'email' ? '输入您的邮箱以继续' :
-                this.loginStep === 'login' ? '欢迎回来，请登录' :
-                this.loginStep === 'register' ? '创建一个新账户' :
-                this.loginStep === 'totp' ? '安全验证' : '系统初始化配置 (OOBE)'
-              )
-                .fontSize(14)
-                .fontColor(this.theme().textSecondary)
-                .textAlign(TextAlign.Center)
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Center)
-            .margin({ bottom: 8 })
-
-            // Optional collapsible Server Endpoint configuration
-            if (this.showEndpointConfig) {
-              Column({ space: 8 }) {
-                Text('服务器接口配置')
-                  .fontSize(12)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.theme().textPrimary)
-                Column({ space: 4 }) {
-                  Text('集控 API 地址 (Management)').fontSize(11).fontColor(this.theme().textSecondary)
-                  TextInput({ text: this.managementEndpoint })
-                    .height(34)
-                    .fontSize(12)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.managementEndpoint = v; })
-                }.alignItems(HorizontalAlign.Start)
-
-                Column({ space: 4 }) {
-                  Text('超管 API 地址 (Admin)').fontSize(11).fontColor(this.theme().textSecondary)
-                  TextInput({ text: this.adminEndpoint })
-                    .height(34)
-                    .fontSize(12)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.adminEndpoint = v; })
-                }.alignItems(HorizontalAlign.Start)
-
-                Row({ space: 8 }) {
-                  Button('初始化向导 (OOBE)')
-                    .height(28)
-                    .fontSize(11)
-                    .fontColor(this.theme().textSecondary)
-                    .backgroundColor(this.theme().bgSubtle)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onClick(() => {
-                      this.loginStep = this.loginStep === 'oobe' ? 'email' : 'oobe';
-                      this.showEndpointConfig = false;
-                    })
-                  Blank()
-                  Button('完成')
-                    .height(28)
-                    .fontSize(11)
-                    .fontColor('#FFFFFF')
-                    .backgroundColor(this.theme().accentColor)
-                    .borderRadius(4)
-                    .onClick(() => {
-                      ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-                      this.showEndpointConfig = false;
-                    })
-                }.width('100%')
-              }
-              .width('100%')
-              .padding(12)
-              .backgroundColor(this.theme().bgSubtle)
-              .borderRadius(6)
-              .border({ width: 1, color: this.theme().borderColor })
-            }
-
-            // MessageBar for Error / Info
-            if (this.authError.length > 0) {
-              Row() {
-                Text(this.authError)
-                  .fontSize(13)
-                  .fontColor(this.theme().badgeDangerFg)
-              }
-              .width('100%')
-              .padding(10)
-              .backgroundColor(this.theme().badgeDangerBg)
-              .borderRadius(4)
-            }
-            if (this.authInfoMsg.length > 0) {
-              Row() {
-                Text(this.authInfoMsg)
-                  .fontSize(13)
-                  .fontColor(this.theme().badgeSuccessFg)
-              }
-              .width('100%')
-              .padding(10)
-              .backgroundColor(this.theme().badgeSuccessBg)
-              .borderRadius(4)
-            }
-
-            // Step 1: Email check (matches web/app/login/page.tsx step === "email")
-            if (this.loginStep === 'email') {
-              Column({ space: 14 }) {
-                Column({ space: 6 }) {
-                  Text('邮箱地址').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: 'you@example.com', text: this.emailInput })
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.emailInput = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.isSubmitting ? '请稍候...' : '继续')
-                  .width('100%')
-                  .height(38)
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
-                  .backgroundColor(this.theme().accentColor)
-                  .borderRadius(4)
-                  .onClick(() => {
-                    this.handleEmailCheck();
-                  })
-
-                Text('使用用户名与密码直接登录')
-                  .fontSize(12)
-                  .fontColor(this.theme().accentColor)
-                  .padding(4)
-                  .onClick(() => {
-                    this.loginStep = 'login';
-                  })
-              }
-              .width('100%')
-            } else if (this.loginStep === 'login') {
-              // Step 2: Login (matches web/app/login/page.tsx step === "login")
-              Column({ space: 14 }) {
-                Column({ space: 6 }) {
-                  Text('邮箱或用户名').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '输入邮箱或用户名', text: this.loginUsername || this.emailInput })
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => {
-                      this.loginUsername = v;
-                      this.emailInput = v;
-                    })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Column({ space: 6 }) {
-                  Text('密码').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '输入密码', text: this.loginPassword })
-                    .type(InputType.Password)
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.loginPassword = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.isSubmitting ? '登录中...' : '登录')
-                  .width('100%')
-                  .height(38)
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
-                  .backgroundColor(this.theme().accentColor)
-                  .borderRadius(4)
-                  .onClick(() => {
-                    this.handleLogin();
-                  })
-
-                Button('使用其他邮箱')
-                  .width('100%')
-                  .height(34)
-                  .fontSize(13)
-                  .fontColor(this.theme().textSecondary)
-                  .backgroundColor(Color.Transparent)
-                  .onClick(() => {
-                    this.loginStep = 'email';
-                    this.loginPassword = '';
-                    this.authError = '';
-                  })
-              }
-              .width('100%')
-            } else if (this.loginStep === 'register') {
-              // Step 3: Register (matches web/app/login/page.tsx step === "register")
-              Column({ space: 14 }) {
-                Column({ space: 6 }) {
-                  Text('邮箱').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ text: this.emailInput })
-                    .enabled(false)
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textSecondary)
-                    .backgroundColor(this.theme().bgSubtle)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Column({ space: 6 }) {
-                  Text('显示名称（可选）').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '您的昵称', text: this.regDisplayName })
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.regDisplayName = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Column({ space: 6 }) {
-                  Text('密码（至少 12 个字符）').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '设置安全密码', text: this.loginPassword })
-                    .type(InputType.Password)
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.loginPassword = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Text('密码长度至少为 12 个字符，用户名将自动生成')
-                  .fontSize(12)
-                  .fontColor(this.theme().textSecondary)
-                  .width('100%')
-
-                Button(this.isSubmitting ? '提交中...' : '完成注册')
-                  .width('100%')
-                  .height(38)
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
-                  .backgroundColor(this.theme().accentColor)
-                  .borderRadius(4)
-                  .onClick(() => {
-                    this.handleRegister();
-                  })
-
-                Button('使用其他邮箱')
-                  .width('100%')
-                  .height(34)
-                  .fontSize(13)
-                  .fontColor(this.theme().textSecondary)
-                  .backgroundColor(Color.Transparent)
-                  .onClick(() => {
-                    this.loginStep = 'email';
-                    this.loginPassword = '';
-                    this.authError = '';
-                  })
-              }
-              .width('100%')
-            } else if (this.loginStep === 'totp') {
-              // Step 4: 2FA Verification (matches web/app/login/page.tsx step === "2fa")
-              Column({ space: 14 }) {
-                Column({ space: 6 }) {
-                  Text(this.totpUseRecovery ? '恢复码' : '两步验证码')
-                    .fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({
-                    placeholder: this.totpUseRecovery ? '输入恢复码' : '输入 6 位验证码',
-                    text: this.totpCode
-                  })
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.totpCode = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.totpUseRecovery ? '恢复' : '验证')
-                  .width('100%')
-                  .height(38)
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
-                  .backgroundColor(this.theme().accentColor)
-                  .borderRadius(4)
-                  .onClick(() => {
-                    this.handleTotpVerify();
-                  })
-
-                Row({ space: 8 }) {
-                  Button(this.totpUseRecovery ? '使用验证码' : '使用恢复码')
-                    .height(32)
-                    .fontSize(12)
-                    .fontColor(this.theme().textSecondary)
-                    .backgroundColor(Color.Transparent)
-                    .layoutWeight(1)
-                    .onClick(() => {
-                      this.totpUseRecovery = !this.totpUseRecovery;
-                      this.totpCode = '';
-                    })
-                  Button('返回')
-                    .height(32)
-                    .fontSize(12)
-                    .fontColor(this.theme().textSecondary)
-                    .backgroundColor(Color.Transparent)
-                    .layoutWeight(1)
-                    .onClick(() => {
-                      this.loginStep = 'login';
-                      this.totpCode = '';
-                    })
-                }.width('100%')
-              }
-              .width('100%')
-            } else if (this.loginStep === 'oobe') {
-              // OOBE First-Run Setup Wizard
-              Column({ space: 10 }) {
-                Row({ space: 8 }) {
-                  TextInput({ placeholder: '服务端 OOBE Passcode', text: this.oobePasscode })
-                    .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
-                    .onChange((v: string) => { this.oobePasscode = v; })
-                  Button('验证口令')
-                    .height(36).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor).borderRadius(4)
-                    .onClick(async () => {
-                      ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-                      const r = await ApiService.get().verifyOobe(this.oobePasscode);
-                      if (r.ok) {
-                        this.oobeVerified = true;
-                        this.authInfoMsg = 'OOBE 口令验证通过';
-                      } else {
-                        this.authError = r.error || 'OOBE 口令验证失败';
-                      }
-                    })
-                }.width('100%')
-
-                TextInput({ placeholder: 'PostgreSQL 连接串', text: this.oobePgUrl })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobePgUrl = v; })
-                TextInput({ placeholder: 'Redis 连接串', text: this.oobeRedisUrl })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeRedisUrl = v; })
-                TextInput({ placeholder: '系统主域名', text: this.oobeDomain })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeDomain = v; })
-                TextInput({ placeholder: '超级管理员用户名', text: this.oobeAdminUser })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeAdminUser = v; })
-                TextInput({ placeholder: '超级管理员邮箱', text: this.oobeAdminEmail })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeAdminEmail = v; })
-                TextInput({ placeholder: '超级管理员初始密码', text: this.oobeAdminPassword })
-                  .type(InputType.Password)
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeAdminPassword = v; })
-
-                Row({ space: 8 }) {
-                  Button('返回')
-                    .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgSubtle)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
-                    .onClick(() => { this.loginStep = 'email'; })
-                  Button('完成初始化')
-                    .height(36).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor)
-                    .borderRadius(4).layoutWeight(2)
-                    .onClick(async () => {
-                      ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-                      const payload: Record<string, Object> = {
-                        'passcode': this.oobePasscode,
-                        'postgres_url': this.oobePgUrl,
-                        'redis_url': this.oobeRedisUrl,
-                        'domain': this.oobeDomain,
-                        'admin_username': this.oobeAdminUser,
-                        'admin_email': this.oobeAdminEmail,
-                        'admin_password': this.oobeAdminPassword
-                      };
-                      const r = await ApiService.get().configureOobe(payload);
-                      if (r.ok) {
-                        this.loginStep = 'login';
-                        this.authInfoMsg = '系统初始化成功，请登录';
-                      } else {
-                        this.authError = r.error || '初始化失败';
-                      }
-                    })
-                }.width('100%')
-              }
-              .width('100%')
-            }
-
-            this.buildWebFooterDisclaimer()
-          }
-          .width(this.breakpoint === 'sm' ? '92%' : 420)
-          .padding(this.breakpoint === 'sm' ? 24 : 36)
-          .backgroundColor(this.theme().bgCard)
-          .borderRadius(12)
-          .shadow({ radius: 24, color: '#26000000', offsetX: 0, offsetY: 8 })
-          .margin({ top: 56, bottom: 36 })
-        }
-        .width('100%')
-        .constraintSize({ minHeight: '100%' })
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-      }
-      .width('100%')
-      .height('100%')
-
-      // Floating Top-Right Theme Switcher & Server Config Gear (Safe-Area & PC Caption Bar aware)
-      Row({ space: 8 }) {
-        Button('服务器设置')
-          .height(28)
-          .fontSize(12)
-          .fontColor('#FFFFFF')
-          .backgroundColor('#26000000')
-          .border({ width: 1, color: '#44FFFFFF', radius: 6 })
-          .onClick(() => {
-            this.showEndpointConfig = !this.showEndpointConfig;
-          })
-        this.buildThemeModeToggle(true)
-      }
-      .margin({
-        top: this.safeTopVp + 14,
-        right: Math.max(this.safeRightVp, this.captionRightReserveVp) + 16
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ bottom: this.safeBottomVp })
-    .backgroundColor(this.theme().loginBg)
-  }
-
-  // ==================== 2. Web Account Selection Screen (/ — AccountListPage) ====================
-  @Builder
-  buildAccountSelectionScreen() {
-    Stack({ alignContent: Alignment.TopEnd }) {
-      Scroll() {
-        Column() {
-          Column({ space: 14 }) {
-            // Header
-            Column({ space: 6 }) {
-              Image($r('app.media.app_icon'))
-                .width(48)
-                .height(48)
-                .borderRadius(10)
-                .margin({ bottom: 4 })
-              Text('选择 MINI ClassIsland 账户')
-                .fontSize(20)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.theme().textPrimary)
-              Text('选择一个账户以进入集控管理面板')
-                .fontSize(13)
-                .fontColor(this.theme().textSecondary)
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Center)
-            .margin({ bottom: 8 })
-
-            if (this.accounts.length === 0) {
-              Column({ space: 6 }) {
-                Text('您还没有加入任何 MINI ClassIsland 账户')
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor(this.theme().textSecondary)
-                Text('请创建一个新账户或使用邀请码加入已有账户')
-                  .fontSize(12)
-                  .fontColor(this.theme().textTertiary)
-              }
-              .width('100%')
-              .padding(24)
-              .alignItems(HorizontalAlign.Center)
-            } else {
-              Column({ space: 10 }) {
-                ForEach(this.accounts, (acc: AccountSummary) => {
-                  Row({ space: 14 }) {
-                    // Left 44x44 blue icon box
-                    Column() {
-                      Text(acc.name && acc.name.length > 0 ? acc.name.substring(0, 1).toUpperCase() : 'M')
-                        .fontSize(18)
-                        .fontWeight(FontWeight.Bold)
-                        .fontColor(this.theme().accentColor)
-                    }
-                    .width(44)
-                    .height(44)
-                    .borderRadius(10)
-                    .backgroundColor(this.theme().bgAccentSubtle)
-                    .justifyContent(FlexAlign.Center)
-                    .alignItems(HorizontalAlign.Center)
-
-                    // Center info
-                    Column({ space: 4 }) {
-                      Text(acc.name)
-                        .fontSize(16)
-                        .fontWeight(FontWeight.Bold)
-                        .fontColor(this.theme().textPrimary)
-                        .maxLines(1)
-                      Row({ space: 6 }) {
-                        if (acc.slug && acc.slug.length > 0) {
-                          Text(acc.slug)
-                            .fontSize(11)
-                            .fontColor(this.theme().textSecondary)
-                            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                            .backgroundColor(this.theme().bgSubtle)
-                            .borderRadius(4)
-                        }
-                        Text(acc.is_active !== false ? '活跃' : '停用')
-                          .fontSize(11)
-                          .fontWeight(FontWeight.Medium)
-                          .fontColor(acc.is_active !== false ? this.theme().badgeSuccessFg : this.theme().badgeDangerFg)
-                          .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                          .backgroundColor(acc.is_active !== false ? this.theme().badgeSuccessBg : this.theme().badgeDangerBg)
-                          .borderRadius(99)
-                      }
-                      Text(`ID: ${acc.id}`)
-                        .fontSize(11)
-                        .fontColor(this.theme().textTertiary)
-                    }
-                    .alignItems(HorizontalAlign.Start)
-                    .layoutWeight(1)
-
-                    Text('→')
-                      .fontSize(18)
-                      .fontColor(this.theme().textSecondary)
-                  }
-                  .width('100%')
-                  .padding({ left: 18, right: 18, top: 14, bottom: 14 })
-                  .backgroundColor(this.theme().bgCard)
-                  .borderRadius(10)
-                  .border({ width: 1, color: this.theme().borderColor })
-                  .onClick(() => {
-                    this.selectAccountAndEnter(acc);
-                  })
-                }, (acc: AccountSummary) => `${acc.id}`)
-              }
-              .width('100%')
-            }
-
-            // Create Account Inline Dialog Card
-            if (this.showCreateAccountDialog) {
-              Column({ space: 10 }) {
-                Text('创建新账户')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.theme().textPrimary)
-                Column({ space: 4 }) {
-                  Text('账户名称').fontSize(12).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '例如：北京市第一中学', text: this.newTenantName })
-                    .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.newTenantName = v; })
-                }.alignItems(HorizontalAlign.Start).width('100%')
-
-                Column({ space: 4 }) {
-                  Text('子域名标识 (Slug，可选)').fontSize(12).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '例如：beijing-no1-high', text: this.newTenantSlug })
-                    .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.newTenantSlug = v; })
-                }.alignItems(HorizontalAlign.Start).width('100%')
-
-                Row({ space: 8 }) {
-                  Button('取消')
-                    .height(34).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgCard)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
-                    .onClick(() => { this.showCreateAccountDialog = false; })
-                  Button('创建')
-                    .height(34).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor)
-                    .borderRadius(4).layoutWeight(1)
-                    .onClick(async () => {
-                      if (!this.newTenantName.trim()) { return; }
-                      const r = await ApiService.get().createTenantAccount(this.newTenantName.trim(), this.newTenantSlug.trim());
-                      if (r.ok && r.data) {
-                        this.newTenantName = '';
-                        this.newTenantSlug = '';
-                        this.showCreateAccountDialog = false;
-                        await this.refreshAccountsList();
-                        const createdSummary: AccountSummary = {
-                          id: r.data.id,
-                          name: r.data.name,
-                          slug: r.data.slug,
-                          api_key: r.data.api_key,
-                          is_active: r.data.is_active,
-                          role: 'owner'
-                        };
-                        this.selectAccountAndEnter(createdSummary);
-                      }
-                    })
-                }.width('100%')
-              }
-              .width('100%')
-              .padding(14)
-              .backgroundColor(this.theme().bgSubtle)
-              .borderRadius(8)
-              .border({ width: 1, color: this.theme().borderColor })
-            }
-
-            // Join By Invite Inline Dialog Card
-            if (this.showJoinInviteDialog) {
-              Column({ space: 10 }) {
-                Text('使用邀请码加入')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.theme().textPrimary)
-                TextInput({ placeholder: '输入邀请码', text: this.inviteCodeInput })
-                  .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.inviteCodeInput = v; })
-                Row({ space: 8 }) {
-                  Button('取消')
-                    .height(34).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgCard)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
-                    .onClick(() => { this.showJoinInviteDialog = false; })
-                  Button('加入账户')
-                    .height(34).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor)
-                    .borderRadius(4).layoutWeight(1)
-                    .onClick(async () => {
-                      if (!this.inviteCodeInput.trim()) { return; }
-                      const r = await ApiService.get().acceptInvitation(this.inviteCodeInput.trim());
-                      if (r.ok) {
-                        this.inviteCodeInput = '';
-                        this.showJoinInviteDialog = false;
-                        await this.refreshAccountsList();
-                      }
-                    })
-                }.width('100%')
-              }
-              .width('100%')
-              .padding(14)
-              .backgroundColor(this.theme().bgSubtle)
-              .borderRadius(8)
-              .border({ width: 1, color: this.theme().borderColor })
-            }
-
-            // Action Buttons Row (matches web/app/page.tsx)
-            Row({ space: 8 }) {
-              Button('+ 创建新账户')
-                .height(36)
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor('#FFFFFF')
-                .backgroundColor(this.theme().accentColor)
-                .borderRadius(4)
-                .layoutWeight(1)
-                .onClick(() => {
-                  this.showCreateAccountDialog = !this.showCreateAccountDialog;
-                  this.showJoinInviteDialog = false;
-                })
-              Button('使用邀请码加入')
-                .height(36)
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(this.theme().textPrimary)
-                .backgroundColor(this.theme().bgCard)
-                .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                .layoutWeight(1)
-                .onClick(() => {
-                  this.showJoinInviteDialog = !this.showJoinInviteDialog;
-                  this.showCreateAccountDialog = false;
-                })
-            }
-            .width('100%')
-            .margin({ top: 6 })
-
-            if (this.currentUser && this.currentUser.role === 'superadmin') {
-              Button('进入超级管理平台')
-                .width('100%')
-                .height(36)
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(this.theme().accentColor)
-                .backgroundColor(this.theme().bgAccentSubtle)
-                .borderRadius(4)
-                .onClick(() => {
-                  this.isSuperAdminMode = true;
-                  this.currentAccountId = -1;
-                  this.currentSection = 'admin_dashboard';
-                  this.refreshDashboardMetrics();
-                })
-            }
-
-            Button('退出登录')
-              .height(32)
-              .fontSize(13)
-              .fontColor(this.theme().textSecondary)
-              .backgroundColor(Color.Transparent)
-              .onClick(async () => {
-                await ApiService.get().logout();
-                this.isLoggedIn = false;
-                this.currentAccountId = 0;
-              })
-
-            this.buildWebFooterDisclaimer()
-          }
-          .width(this.breakpoint === 'sm' ? '92%' : 460)
-          .padding(this.breakpoint === 'sm' ? 24 : 36)
-          .backgroundColor(this.theme().bgCard)
-          .borderRadius(12)
-          .shadow({ radius: 24, color: '#26000000', offsetX: 0, offsetY: 8 })
-          .margin({ top: 56, bottom: 36 })
-        }
-        .width('100%')
-        .constraintSize({ minHeight: '100%' })
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-      }
-      .width('100%')
-      .height('100%')
-
-      Row() {
-        this.buildThemeModeToggle(true)
-      }
-      .margin({
-        top: this.safeTopVp + 14,
-        right: Math.max(this.safeRightVp, this.captionRightReserveVp) + 16
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ bottom: this.safeBottomVp })
-    .backgroundColor(this.theme().loginBg)
-  }
-
-  // ==================== 3. Web TopBar (Integrated with HMOS PC / Free Multi-Window TitleBar & Safe-Area) & UserMenu Popover ====================
   @Builder
   buildTopBar() {
     Column() {
       Row({ space: 12 }) {
         if (this.breakpoint === 'sm') {
-          Button('☰')
-            .width(34)
-            .height(32)
-            .fontSize(16)
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgSubtle)
-            .border({ width: 1, color: this.theme().borderColor, radius: 6 })
-            .onClick(() => {
+          HmosIconButton(
+            $r('sys.symbol.line_3_horizontal'),
+            this.theme().textPrimary,
+            this.theme().bgSubtle,
+            this.theme().borderColor,
+            () => {
               this.showMobileDrawer = !this.showMobileDrawer;
               this.showUserMenuPopover = false;
-            })
+            },
+            34,
+            16
+          )
         }
 
         Text(this.isSuperAdminMode ? 'MINI ClassIsland 超级管理平台' : 'MINI ClassIsland 管理面板')
@@ -1161,9 +293,8 @@ struct Index {
           .layoutWeight(1)
           .maxLines(1)
 
-        this.buildThemeModeToggle(false)
+        this.buildThemeModeToggle()
 
-        // UserMenu Trigger Pill (matches web/components/UserMenu.tsx)
         Row({ space: 8 }) {
           Column() {
             Text(
@@ -1190,9 +321,7 @@ struct Index {
               .maxLines(1)
           }
 
-          Text('▾')
-            .fontSize(10)
-            .fontColor(this.theme().textSecondary)
+          HmosSymbolIcon($r('sys.symbol.chevron_down'), 12, this.theme().textSecondary)
         }
         .padding({ left: 8, right: 10, top: 4, bottom: 4 })
         .backgroundColor(this.theme().bgCard)
@@ -1219,7 +348,6 @@ struct Index {
   @Builder
   buildUserMenuDropdown() {
     Column({ space: 4 }) {
-      // User Header
       Row({ space: 10 }) {
         Column() {
           Text(
@@ -1342,11 +470,9 @@ struct Index {
     .shadow({ radius: 16, color: '#24000000', offsetX: 0, offsetY: 4 })
   }
 
-  // ==================== 4. Web Sidebar (matches web/components/Sidebar.tsx & admin/components/AdminShell.tsx) ====================
   @Builder
   buildSidebar() {
     Column() {
-      // Sidebar Header aligned with 48vp Integrated TitleBar + Top Safe-Area
       Row({ space: 10 }) {
         Image($r('app.media.app_icon'))
           .width(26)
@@ -1368,7 +494,6 @@ struct Index {
       })
       .border({ width: { bottom: 1 }, color: this.theme().borderColor })
 
-      // Sidebar Nav Items
       Scroll() {
         Column({ space: 14 }) {
           if (this.isSuperAdminMode) {
@@ -1464,240 +589,61 @@ struct Index {
     .border({ width: { right: 1 }, color: this.theme().borderColor })
   }
 
-  // ==================== 5. Web Dashboard Content (matches web/app/dashboard/page.tsx) ====================
-  @Builder
-  buildStatCard(value: string, label: string, valueColor: string, targetSec: string) {
-    Column({ space: 6 }) {
-      Text(value)
-        .fontSize(28)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(valueColor)
-      Text(label)
-        .fontSize(13)
-        .fontColor(this.theme().textSecondary)
-    }
-    .alignItems(HorizontalAlign.Start)
-    .padding(20)
-    .backgroundColor(this.theme().bgCard)
-    .borderRadius(8)
-    .border({ width: 1, color: this.theme().borderColor })
-    .layoutWeight(1)
-    .onClick(() => {
-      this.currentSection = targetSec;
-    })
-  }
-
-  @Builder
-  buildDashboardContent() {
-    Column({ space: 16 }) {
-      if (this.isSuperAdminTakeover) {
-        Row({ space: 8 }) {
-          Text(`当前正在以超级管理员身份接管集控账户：${this.currentAccountName} (#${this.currentAccountId})`)
-            .fontSize(13)
-            .fontColor(this.theme().badgeWarningFg)
-            .layoutWeight(1)
-          Button('返回超管平台')
-            .height(28)
-            .fontSize(12)
-            .fontColor('#FFFFFF')
-            .backgroundColor(this.theme().accentColor)
-            .borderRadius(4)
-            .onClick(() => {
-              this.isSuperAdminTakeover = false;
-              this.isSuperAdminMode = true;
-              this.currentSection = 'admin_accounts';
-            })
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor(this.theme().badgeWarningBg)
-        .borderRadius(6)
-      }
-
-      // Page Header (.page-header)
-      Row({ space: 12 }) {
-        Column({ space: 4 }) {
-          Text('仪表盘')
-            .fontSize(22)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.theme().textPrimary)
-          Text(`当前账户：${this.currentAccountName || '-'} — 实时集控运行状态总览`)
-            .fontSize(13)
-            .fontColor(this.theme().textSecondary)
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-
-        Button('下载通用配置 (仅接口地址)')
-          .height(34)
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFF')
-          .backgroundColor(this.theme().accentColor)
-          .borderRadius(4)
-          .onClick(async () => {
-            const r = await ApiService.get().getManagementPresetJson(this.currentAccountId);
-            if (r.ok && r.data) {
-              this.dashPresetJson = r.data;
-            }
-          })
-      }
-      .width('100%')
-
-      // 4 Stat Cards (.grid-4)
-      if (this.breakpoint === 'lg') {
-        Row({ space: 16 }) {
-          this.buildStatCard(`${this.dashOnlineClients} / ${this.dashTotalClients}`, '在线客户端 / 注册设备总数', this.theme().successColor, 'clients')
-          this.buildStatCard(`${this.dashPendingPairings}`, '待审批配对码请求', this.theme().warningColor, 'pairing')
-          this.buildStatCard(`${this.dashTotalResources}`, '已创建配置档案资源总数', this.theme().accentColor, 'res_Subjects')
-          this.buildStatCard(`${this.dashRecentAudits}`, '近期客户端审计记录', this.theme().textPrimary, 'audit')
-        }
-        .width('100%')
-      } else {
-        Column({ space: 12 }) {
-          Row({ space: 12 }) {
-            this.buildStatCard(`${this.dashOnlineClients} / ${this.dashTotalClients}`, '在线客户端 / 注册总数', this.theme().successColor, 'clients')
-            this.buildStatCard(`${this.dashPendingPairings}`, '待审批配对码请求', this.theme().warningColor, 'pairing')
-          }.width('100%')
-          Row({ space: 12 }) {
-            this.buildStatCard(`${this.dashTotalResources}`, '已创建档案资源总数', this.theme().accentColor, 'res_Subjects')
-            this.buildStatCard(`${this.dashRecentAudits}`, '近期客户端审计记录', this.theme().textPrimary, 'audit')
-          }.width('100%')
-        }
-      }
-
-      if (this.dashPresetJson.length > 0) {
-        Column({ space: 8 }) {
-          Row() {
-            Text(`ManagementPreset-${this.currentAccountSlug || 'account'}-generic.json`)
-              .fontSize(14)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.theme().textPrimary)
-              .layoutWeight(1)
-            Button('关闭')
-              .height(26)
-              .fontSize(12)
-              .fontColor(this.theme().textSecondary)
-              .backgroundColor(this.theme().bgSubtle)
-              .borderRadius(4)
-              .onClick(() => { this.dashPresetJson = ''; })
-          }.width('100%')
-
-          TextArea({ text: this.dashPresetJson })
-            .height(120)
-            .fontSize(12)
-            .fontFamily('monospace')
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgSubtle)
-            .border({ width: 1, color: this.theme().borderColor, radius: 6 })
-        }
-        .width('100%')
-        .padding(18)
-        .backgroundColor(this.theme().bgCard)
-        .borderRadius(8)
-        .border({ width: 1, color: this.theme().borderColor })
-      }
-
-      // Exact Workflow Guide Card from web/app/dashboard/page.tsx
-      Column({ space: 10 }) {
-        Text('MINI ClassIsland 集控工作流指引')
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.theme().textPrimary)
-
-        Text('1. 接入客户端：点击右上角「下载通用配置」并将生成的 ManagementPreset.json 放入 ClassIsland 程序目录；或在「接入管理 -> 预注册客户端」中为指定班级生成带标识的专属引导配置，结合「配对码管理」完成设备准入。')
-          .fontSize(13)
-          .fontColor(this.theme().textSecondary)
-          .lineHeight(20)
-
-        Text('2. 编写 7 大资源档案：在左侧「档案管理」下依次配置科目 (Subjects)、时间表 (TimeLayout)、课表 (ClassPlan)、策略 (Policy)、默认设置 (DefaultSettings)、组件 (Components) 与凭据 (Credentials)。')
-          .fontSize(13)
-          .fontColor(this.theme().textSecondary)
-          .lineHeight(20)
-
-        Text('3. 按设备精准分配与控制：在「客户端 -> 客户端管理」中可为不同班级绑定专属课表与策略，或实时推送通知横幅、强制同步与重启指令。')
-          .fontSize(13)
-          .fontColor(this.theme().textSecondary)
-          .lineHeight(20)
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .padding(20)
-      .backgroundColor(this.theme().bgCard)
-      .borderRadius(8)
-      .border({ width: 1, color: this.theme().borderColor })
-    }
-    .width('100%')
-  }
-
-  // ==================== 6. SuperAdmin Dashboard Content (matches admin/app/page.tsx) ====================
-  @Builder
-  buildSuperAdminDashboard() {
-    Column({ space: 16 }) {
-      Row() {
-        Column({ space: 4 }) {
-          Text('全局平台总览')
-            .fontSize(22)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.theme().textPrimary)
-          Text('MINI ClassIsland 超级管理平台实时运行指标与全局统计')
-            .fontSize(13)
-            .fontColor(this.theme().textSecondary)
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-
-        Button('刷新数据')
-          .height(34)
-          .fontSize(13)
-          .fontColor(this.theme().textPrimary)
-          .backgroundColor(this.theme().bgCard)
-          .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-          .onClick(() => {
-            this.refreshDashboardMetrics();
-          })
-      }
-      .width('100%')
-
-      Column({ space: 12 }) {
-        Row({ space: 12 }) {
-          this.buildStatCard(`${this.adminGlobalStats?.total_users ?? 0}`, '全局注册用户数', this.theme().accentColor, 'admin_users')
-          this.buildStatCard(`${this.adminGlobalStats?.pending_users ?? 0}`, '待审核注册申请', this.theme().warningColor, 'admin_pending')
-        }.width('100%')
-        Row({ space: 12 }) {
-          this.buildStatCard(`${this.adminGlobalStats?.total_accounts ?? 0}`, '集控账户 (Tenants) 总数', this.theme().accentColor, 'admin_accounts')
-          this.buildStatCard(`${this.adminGlobalStats?.online_clients ?? 0} / ${this.adminGlobalStats?.total_clients ?? 0}`, '全局在线客户端 / 注册总数', this.theme().successColor, 'admin_accounts')
-        }.width('100%')
-      }
-
-      Column({ space: 8 }) {
-        Text('超级管理员工作台说明')
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.theme().textPrimary)
-        Text('您当前处于 MINI ClassIsland 超级管理平台。您可以在左侧导航中管理全局用户、审批新用户注册申请、配置各集控账户的商业化/资源配额，或一键接管任意集控账户。')
-          .fontSize(13)
-          .fontColor(this.theme().textSecondary)
-          .lineHeight(20)
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .padding(20)
-      .backgroundColor(this.theme().bgCard)
-      .borderRadius(8)
-      .border({ width: 1, color: this.theme().borderColor })
-    }
-    .width('100%')
-  }
-
   @Builder
   buildMainActiveView() {
     Scroll() {
       Column({ space: 16 }) {
-        if (this.isSuperAdminMode && this.currentSection === 'admin_dashboard') {
-          this.buildSuperAdminDashboard()
-        } else if (this.currentSection === 'dashboard') {
-          this.buildDashboardContent()
+        if (this.deepLinkBannerMsg.length > 0) {
+          Row({ space: 8 }) {
+            Text(this.deepLinkBannerMsg)
+              .fontSize(12)
+              .fontColor(this.theme().badgeInfoFg)
+              .layoutWeight(1)
+            HmosIconButton(
+              $r('sys.symbol.xmark'),
+              this.theme().badgeInfoFg,
+              Color.Transparent,
+              Color.Transparent,
+              () => {
+                this.deepLinkBannerMsg = '';
+              },
+              24,
+              12
+            )
+          }
+          .width('100%')
+          .padding(10)
+          .backgroundColor(this.theme().badgeInfoBg)
+          .borderRadius(6)
+        }
+
+        if ((this.isSuperAdminMode && this.currentSection === 'admin_dashboard') || this.currentSection === 'dashboard') {
+          DashboardView({
+            isSuperAdminMode: this.isSuperAdminMode && this.currentSection === 'admin_dashboard',
+            isSuperAdminTakeover: this.isSuperAdminTakeover,
+            currentAccountId: this.currentAccountId,
+            currentAccountName: this.currentAccountName,
+            currentAccountSlug: this.currentAccountSlug,
+            breakpoint: this.breakpoint,
+            themeMode: this.themeMode,
+            dashOnlineClients: this.dashOnlineClients,
+            dashTotalClients: this.dashTotalClients,
+            dashPendingPairings: this.dashPendingPairings,
+            dashTotalResources: this.dashTotalResources,
+            dashRecentAudits: this.dashRecentAudits,
+            adminGlobalStats: this.adminGlobalStats,
+            onNavigateSection: (sec: string) => {
+              this.currentSection = sec;
+            },
+            onExitTakeover: () => {
+              this.isSuperAdminTakeover = false;
+              this.isSuperAdminMode = true;
+              this.currentSection = 'admin_accounts';
+            },
+            onRefreshStats: () => {
+              this.refreshDashboardMetrics();
+            }
+          })
         } else if (this.currentSection.indexOf('res_') === 0) {
           ProfileEditorView({
             accountId: this.currentAccountId,
@@ -1746,11 +692,76 @@ struct Index {
   build() {
     Column() {
       if (!this.isLoggedIn) {
-        this.buildLoginScreen()
+        AuthAndAccountView({
+          mode: 'login',
+          breakpoint: this.breakpoint,
+          themeMode: this.themeMode,
+          safeTopVp: this.safeTopVp,
+          safeBottomVp: this.safeBottomVp,
+          safeRightVp: this.safeRightVp,
+          captionRightReserveVp: this.captionRightReserveVp,
+          currentUser: this.currentUser,
+          accounts: this.accounts,
+          onThemeChange: (nextMode: string) => {
+            this.themeMode = nextMode;
+          },
+          onAuthCompleted: (token: string, user: UserInfo) => {
+            this.onAuthSuccess(token, user);
+          },
+          onSelectAccount: (acc: AccountSummary) => {
+            this.selectAccountAndEnter(acc);
+          },
+          onEnterSuperAdmin: () => {
+            this.isSuperAdminMode = true;
+            this.currentAccountId = -1;
+            this.currentSection = 'admin_dashboard';
+            this.refreshDashboardMetrics();
+          },
+          onRefreshAccounts: () => {
+            this.refreshAccountsList();
+          },
+          onLogout: async () => {
+            await ApiService.get().logout();
+            this.isLoggedIn = false;
+            this.currentAccountId = 0;
+          }
+        })
       } else if (!this.isSuperAdminMode && this.currentAccountId <= 0) {
-        this.buildAccountSelectionScreen()
+        AuthAndAccountView({
+          mode: 'accounts',
+          breakpoint: this.breakpoint,
+          themeMode: this.themeMode,
+          safeTopVp: this.safeTopVp,
+          safeBottomVp: this.safeBottomVp,
+          safeRightVp: this.safeRightVp,
+          captionRightReserveVp: this.captionRightReserveVp,
+          currentUser: this.currentUser,
+          accounts: this.accounts,
+          onThemeChange: (nextMode: string) => {
+            this.themeMode = nextMode;
+          },
+          onAuthCompleted: (token: string, user: UserInfo) => {
+            this.onAuthSuccess(token, user);
+          },
+          onSelectAccount: (acc: AccountSummary) => {
+            this.selectAccountAndEnter(acc);
+          },
+          onEnterSuperAdmin: () => {
+            this.isSuperAdminMode = true;
+            this.currentAccountId = -1;
+            this.currentSection = 'admin_dashboard';
+            this.refreshDashboardMetrics();
+          },
+          onRefreshAccounts: () => {
+            this.refreshAccountsList();
+          },
+          onLogout: async () => {
+            await ApiService.get().logout();
+            this.isLoggedIn = false;
+            this.currentAccountId = 0;
+          }
+        })
       } else {
-        // Web AppShell Layout: Sidebar + (TopBar + Main Content Area)
         Stack({ alignContent: Alignment.TopEnd }) {
           if (this.breakpoint === 'sm') {
             Column() {

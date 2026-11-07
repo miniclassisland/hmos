@@ -1,17 +1,13 @@
 import {
   ClientRecord,
-  ClientProfileRecord,
   ResourceItem,
   ConfigSnapshotItem,
-  AuditLogItem,
-  NotificationPayload,
-  AUDIT_EVENT_LABELS,
-  AuditEventLabelDef,
-  getAuditEventLabel,
   formatTimestamp
 } from '../model/Types';
 import { WebThemePalette, getWebPalette } from '../model/Theme';
 import { ApiService } from '../service/ApiService';
+import { HmosIconTextButton } from './HmosIcons';
+import { NotificationsAndAuditView } from './NotificationsAndAuditView';
 
 @Component
 export struct ClientsAndOpsView {
@@ -25,7 +21,7 @@ export struct ClientsAndOpsView {
   @State statusFilter: string = 'all';
   @State selectedUids: string[] = [];
   @State activeClient: ClientRecord | null = null;
-  @State clientInspectorTab: string = 'info'; // 'info' | 'profile' | 'snapshots' | 'audit' | 'notify'
+  @State clientInspectorTab: string = 'info'; // 'info' | 'profile' | 'snapshots' | 'notify'
   @State editDisplayName: string = '';
   @State editClientId: string = '';
 
@@ -50,28 +46,6 @@ export struct ClientsAndOpsView {
   // Config Snapshots
   @State snapshots: ConfigSnapshotItem[] = [];
   @State selectedSnapshotJson: string = '';
-
-  // Audit Logs
-  @State auditLogs: AuditLogItem[] = [];
-  @State auditClientFilter: string = '';
-  @State auditEventFilter: string = 'all';
-  @State selectedAuditDetail: string = '';
-
-  // Notifications
-  @State notifyTargetUid: string = '__broadcast__';
-  @State notifyPayload: NotificationPayload = {
-    MessageMask: '集控中心通知',
-    MessageContent: '请各班注意查收最新课表安排',
-    OverlayIconLeft: 0,
-    OverlayIconRight: 0,
-    IsEmergency: false,
-    IsSpeechEnabled: true,
-    IsSoundEnabled: true,
-    IsEffectEnabled: true,
-    IsTopmost: true,
-    DurationSeconds: 10,
-    RepeatCounts: 1
-  };
 
   @State statusMsg: string = '';
   @State isError: boolean = false;
@@ -101,9 +75,6 @@ export struct ClientsAndOpsView {
         this.selectClient(this.clients[0]);
       }
     }
-    if (this.subMode === 'audit') {
-      await this.loadAuditLogs();
-    }
     if (this.subMode === 'clients') {
       await this.loadResourceCatalog();
     }
@@ -131,7 +102,6 @@ export struct ClientsAndOpsView {
     this.activeClient = c;
     this.editDisplayName = c.display_name || '';
     this.editClientId = c.client_id || '';
-    // Load client profile binding
     const pRes = await ApiService.get().getClientProfile(this.accountId, c.uid);
     if (pRes.ok && pRes.data) {
       const prof = (pRes.data['profile'] || {}) as Record<string, Object>;
@@ -190,17 +160,10 @@ export struct ClientsAndOpsView {
     }
     const r = await ApiService.get().batchClientOperation(this.accountId, this.selectedUids, action);
     if (r.ok) {
-      this.setFeedback(`批量操作 [${action}] 已执行 (${this.selectedUids.length} 台)`, false);
+      this.setFeedback(`批量操作已执行 (${this.selectedUids.length} 台)`, false);
       await this.reloadAll();
     } else {
       this.setFeedback(r.error || '批量操作失败', true);
-    }
-  }
-
-  private async loadAuditLogs(): Promise<void> {
-    const r = await ApiService.get().listAuditLogs(this.accountId, this.auditClientFilter, this.auditEventFilter);
-    if (r.ok && r.data) {
-      this.auditLogs = r.data;
     }
   }
 
@@ -298,17 +261,17 @@ export struct ClientsAndOpsView {
 
       if (this.showDefaultProfilePanel) {
         Column({ space: 8 }) {
-          Text('默认下发档案配置 (__default__)')
+          Text('账户默认下发档案配置')
             .fontSize(14)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.theme().textPrimary)
-          this.buildResourcePickerRow('课表 (ClassPlan)', this.cpFiles, this.bindCp, (v: string) => { this.bindCp = v; })
-          this.buildResourcePickerRow('时间表 (TimeLayout)', this.tlFiles, this.bindTl, (v: string) => { this.bindTl = v; })
-          this.buildResourcePickerRow('科目 (Subjects)', this.subFiles, this.bindSub, (v: string) => { this.bindSub = v; })
-          this.buildResourcePickerRow('策略 (Policy)', this.polFiles, this.bindPol, (v: string) => { this.bindPol = v; })
-          this.buildResourcePickerRow('设置 (DefaultSettings)', this.dsFiles, this.bindDs, (v: string) => { this.bindDs = v; })
-          this.buildResourcePickerRow('组件 (Components)', this.comFiles, this.bindCom, (v: string) => { this.bindCom = v; })
-          this.buildResourcePickerRow('凭据 (Credentials)', this.credFiles, this.bindCred, (v: string) => { this.bindCred = v; })
+          this.buildResourcePickerRow('课表档案', this.cpFiles, this.bindCp, (v: string) => { this.bindCp = v; })
+          this.buildResourcePickerRow('时间表档案', this.tlFiles, this.bindTl, (v: string) => { this.bindTl = v; })
+          this.buildResourcePickerRow('科目档案', this.subFiles, this.bindSub, (v: string) => { this.bindSub = v; })
+          this.buildResourcePickerRow('策略档案', this.polFiles, this.bindPol, (v: string) => { this.bindPol = v; })
+          this.buildResourcePickerRow('默认设置档案', this.dsFiles, this.bindDs, (v: string) => { this.bindDs = v; })
+          this.buildResourcePickerRow('组件设置档案', this.comFiles, this.bindCom, (v: string) => { this.bindCom = v; })
+          this.buildResourcePickerRow('凭据档案', this.credFiles, this.bindCred, (v: string) => { this.bindCred = v; })
           Button('保存默认下发档案')
             .height(34)
             .fontSize(13)
@@ -339,7 +302,6 @@ export struct ClientsAndOpsView {
         .border({ width: 1, color: this.theme().borderColor })
       }
 
-      // Batch operation bar
       if (this.selectedUids.length > 0) {
         Flex({ wrap: FlexWrap.Wrap }) {
           Text(`已选 ${this.selectedUids.length} 台：`)
@@ -348,50 +310,27 @@ export struct ClientsAndOpsView {
             .fontColor(this.theme().accentColor)
             .margin({ right: 6, top: 4 })
           Button('批量同步')
-            .height(26)
-            .fontSize(11)
-            .margin({ right: 4, bottom: 4 })
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgCard)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .height(26).fontSize(11).margin({ right: 4, bottom: 4 }).fontColor(this.theme().textPrimary)
+            .backgroundColor(this.theme().bgCard).border({ width: 1, color: this.theme().borderColor, radius: 4 })
             .onClick(() => { this.runBatchAction('force_sync'); })
           Button('批量重启')
-            .height(26)
-            .fontSize(11)
-            .margin({ right: 4, bottom: 4 })
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgCard)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .height(26).fontSize(11).margin({ right: 4, bottom: 4 }).fontColor(this.theme().textPrimary)
+            .backgroundColor(this.theme().bgCard).border({ width: 1, color: this.theme().borderColor, radius: 4 })
             .onClick(() => { this.runBatchAction('restart'); })
           Button('批量断开')
-            .height(26)
-            .fontSize(11)
-            .margin({ right: 4, bottom: 4 })
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgCard)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .height(26).fontSize(11).margin({ right: 4, bottom: 4 }).fontColor(this.theme().textPrimary)
+            .backgroundColor(this.theme().bgCard).border({ width: 1, color: this.theme().borderColor, radius: 4 })
             .onClick(() => { this.runBatchAction('disconnect'); })
           Button('批量启用')
-            .height(26)
-            .fontSize(11)
-            .margin({ right: 4, bottom: 4 })
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgCard)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .height(26).fontSize(11).margin({ right: 4, bottom: 4 }).fontColor(this.theme().textPrimary)
+            .backgroundColor(this.theme().bgCard).border({ width: 1, color: this.theme().borderColor, radius: 4 })
             .onClick(() => { this.runBatchAction('enable'); })
           Button('批量禁用')
-            .height(26)
-            .fontSize(11)
-            .margin({ right: 4, bottom: 4 })
-            .fontColor(this.theme().dangerColor)
-            .backgroundColor(this.theme().bgCard)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .height(26).fontSize(11).margin({ right: 4, bottom: 4 }).fontColor(this.theme().dangerColor)
+            .backgroundColor(this.theme().bgCard).border({ width: 1, color: this.theme().borderColor, radius: 4 })
             .onClick(() => { this.runBatchAction('disable'); })
           Button('清空选择')
-            .height(26)
-            .fontSize(11)
-            .fontColor(this.theme().textSecondary)
-            .backgroundColor(Color.Transparent)
+            .height(26).fontSize(11).fontColor(this.theme().textSecondary).backgroundColor(Color.Transparent)
             .onClick(() => { this.selectedUids = []; })
         }
         .padding(10)
@@ -475,7 +414,6 @@ export struct ClientsAndOpsView {
         }
         .width('100%')
 
-        // Inspector Tabs (Fluent Tab Bar style)
         Flex({ wrap: FlexWrap.Wrap }) {
           ForEach([
             ['info', '信息与控制'],
@@ -552,23 +490,16 @@ export struct ClientsAndOpsView {
               .fontColor(this.theme().textPrimary)
             Flex({ wrap: FlexWrap.Wrap }) {
               Button('强制同步配置')
-                .height(32)
-                .fontSize(12)
-                .margin({ right: 6, bottom: 6 })
-                .fontColor('#FFFFFF')
-                .backgroundColor(this.theme().accentColor)
-                .borderRadius(4)
+                .height(32).fontSize(12).margin({ right: 6, bottom: 6 })
+                .fontColor('#FFFFFF').backgroundColor(this.theme().accentColor).borderRadius(4)
                 .onClick(async () => {
                   if (!this.activeClient) { return; }
                   await ApiService.get().clientCommandGet(this.accountId, this.activeClient.uid, 'force-sync');
                   this.setFeedback('已下发强制同步指令', false);
                 })
               Button('重启客户端')
-                .height(32)
-                .fontSize(12)
-                .margin({ right: 6, bottom: 6 })
-                .fontColor(this.theme().textPrimary)
-                .backgroundColor(this.theme().bgSubtle)
+                .height(32).fontSize(12).margin({ right: 6, bottom: 6 })
+                .fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgSubtle)
                 .border({ width: 1, color: this.theme().borderColor, radius: 4 })
                 .onClick(async () => {
                   if (!this.activeClient) { return; }
@@ -576,11 +507,8 @@ export struct ClientsAndOpsView {
                   this.setFeedback('已下发重启指令', false);
                 })
               Button('断开连接')
-                .height(32)
-                .fontSize(12)
-                .margin({ right: 6, bottom: 6 })
-                .fontColor(this.theme().textPrimary)
-                .backgroundColor(this.theme().bgSubtle)
+                .height(32).fontSize(12).margin({ right: 6, bottom: 6 })
+                .fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgSubtle)
                 .border({ width: 1, color: this.theme().borderColor, radius: 4 })
                 .onClick(async () => {
                   if (!this.activeClient) { return; }
@@ -589,41 +517,41 @@ export struct ClientsAndOpsView {
                   await this.reloadAll();
                 })
               Button(this.activeClient.status === 'disabled' ? '启用设备' : '禁用设备')
-                .height(32)
-                .fontSize(12)
-                .margin({ right: 6, bottom: 6 })
+                .height(32).fontSize(12).margin({ right: 6, bottom: 6 })
                 .fontColor(this.activeClient.status === 'disabled' ? this.theme().successColor : this.theme().dangerColor)
-                .backgroundColor(this.theme().bgSubtle)
-                .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+                .backgroundColor(this.theme().bgSubtle).border({ width: 1, color: this.theme().borderColor, radius: 4 })
                 .onClick(async () => {
                   if (!this.activeClient) { return; }
                   const act = this.activeClient.status === 'disabled' ? 'enable' : 'disable';
                   await ApiService.get().clientActionPost(this.accountId, this.activeClient.uid, act);
                   await this.reloadAll();
                 })
-              Button('移除设备')
-                .height(32)
-                .fontSize(12)
-                .margin({ right: 6, bottom: 6 })
-                .fontColor(this.theme().dangerColor)
-                .backgroundColor(Color.Transparent)
-                .onClick(async () => {
+              HmosIconTextButton(
+                $r('sys.symbol.trash'),
+                '移除设备',
+                this.theme().dangerColor,
+                Color.Transparent,
+                Color.Transparent,
+                async () => {
                   if (!this.activeClient) { return; }
                   await ApiService.get().deleteClient(this.accountId, this.activeClient.uid);
                   this.activeClient = null;
                   await this.reloadAll();
-                })
+                },
+                32,
+                12
+              )
             }
           }
         } else if (this.clientInspectorTab === 'profile') {
           Column({ space: 6 }) {
-            this.buildResourcePickerRow('课表 (ClassPlan)', this.cpFiles, this.bindCp, (v: string) => { this.bindCp = v; })
-            this.buildResourcePickerRow('时间表 (TimeLayout)', this.tlFiles, this.bindTl, (v: string) => { this.bindTl = v; })
-            this.buildResourcePickerRow('科目 (Subjects)', this.subFiles, this.bindSub, (v: string) => { this.bindSub = v; })
-            this.buildResourcePickerRow('策略 (Policy)', this.polFiles, this.bindPol, (v: string) => { this.bindPol = v; })
-            this.buildResourcePickerRow('设置 (DefaultSettings)', this.dsFiles, this.bindDs, (v: string) => { this.bindDs = v; })
-            this.buildResourcePickerRow('组件 (Components)', this.comFiles, this.bindCom, (v: string) => { this.bindCom = v; })
-            this.buildResourcePickerRow('凭据 (Credentials)', this.credFiles, this.bindCred, (v: string) => { this.bindCred = v; })
+            this.buildResourcePickerRow('课表档案', this.cpFiles, this.bindCp, (v: string) => { this.bindCp = v; })
+            this.buildResourcePickerRow('时间表档案', this.tlFiles, this.bindTl, (v: string) => { this.bindTl = v; })
+            this.buildResourcePickerRow('科目档案', this.subFiles, this.bindSub, (v: string) => { this.bindSub = v; })
+            this.buildResourcePickerRow('策略档案', this.polFiles, this.bindPol, (v: string) => { this.bindPol = v; })
+            this.buildResourcePickerRow('默认设置档案', this.dsFiles, this.bindDs, (v: string) => { this.bindDs = v; })
+            this.buildResourcePickerRow('组件设置档案', this.comFiles, this.bindCom, (v: string) => { this.bindCom = v; })
+            this.buildResourcePickerRow('凭据档案', this.credFiles, this.bindCred, (v: string) => { this.bindCred = v; })
 
             Button('保存此客户端专属档案绑定')
               .height(34)
@@ -656,19 +584,16 @@ export struct ClientsAndOpsView {
               .fontColor(this.theme().textSecondary)
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach([
-                ['1', '设置(1)'],
-                ['2', '档案(2)'],
-                ['3', '当前课表(3)'],
-                ['4', '时间表(4)'],
-                ['5', '科目(5)'],
-                ['6', '日志(6)']
+                ['1', '设置'],
+                ['2', '档案'],
+                ['3', '当前课表'],
+                ['4', '时间表'],
+                ['5', '科目'],
+                ['6', '日志']
               ], (pair: string[]) => {
                 Button(`抓取 ${pair[1]}`)
-                  .height(28)
-                  .fontSize(11)
-                  .margin({ right: 6, bottom: 6 })
-                  .fontColor(this.theme().textPrimary)
-                  .backgroundColor(this.theme().bgSubtle)
+                  .height(28).fontSize(11).margin({ right: 6, bottom: 6 })
+                  .fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgSubtle)
                   .border({ width: 1, color: this.theme().borderColor, radius: 4 })
                   .onClick(async () => {
                     if (!this.activeClient) { return; }
@@ -715,279 +640,17 @@ export struct ClientsAndOpsView {
             }
           }
         } else if (this.clientInspectorTab === 'notify') {
-          this.buildNotificationComposer(this.activeClient.uid)
-        }
-      }
-    }
-    .width('100%')
-    .padding(18)
-    .backgroundColor(this.theme().bgCard)
-    .borderRadius(8)
-    .border({ width: 1, color: this.theme().borderColor })
-  }
-
-  @Builder
-  buildNotificationComposer(fixedClientUid: string) {
-    Column({ space: 14 }) {
-      // Exact Live Banner Preview from web/app/notifications/page.tsx
-      Column({ space: 4 }) {
-        Text('ClassIsland 提醒横幅预览')
-          .fontSize(11)
-          .fontColor(this.notifyPayload.IsEmergency ? '#D13438' : '#CCCCCC')
-        Text(this.notifyPayload.MessageMask || '（遮罩标题）')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.notifyPayload.IsEmergency ? '#D13438' : '#FFFFFF')
-        Text(this.notifyPayload.MessageContent || '（正文内容将在此滚动或居中展示）')
-          .fontSize(14)
-          .fontColor(this.notifyPayload.IsEmergency ? '#D13438' : '#F0F0F0')
-      }
-      .width('100%')
-      .padding({ left: 24, right: 24, top: 16, bottom: 16 })
-      .backgroundColor(this.notifyPayload.IsEmergency ? '#FDE7E9' : '#1F1F1F')
-      .borderRadius(8)
-      .border({ width: 1, color: this.theme().borderColor })
-      .alignItems(HorizontalAlign.Center)
-
-      Column({ space: 12 }) {
-        if (fixedClientUid.length === 0) {
-          Column({ space: 6 }) {
-            Text('目标客户端（单发时必选）')
-              .fontSize(13)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.theme().textPrimary)
-            Flex({ wrap: FlexWrap.Wrap }) {
-              Button('全体在线客户端广播')
-                .height(28)
-                .fontSize(12)
-                .margin({ right: 6, bottom: 6 })
-                .fontColor(this.notifyTargetUid === '__broadcast__' ? '#FFFFFF' : this.theme().textPrimary)
-                .backgroundColor(this.notifyTargetUid === '__broadcast__' ? this.theme().accentColor : this.theme().bgSubtle)
-                .borderRadius(4)
-                .onClick(() => { this.notifyTargetUid = '__broadcast__'; })
-              ForEach(this.clients, (c: ClientRecord) => {
-                Button(c.display_name || c.client_id)
-                  .height(28)
-                  .fontSize(12)
-                  .margin({ right: 6, bottom: 6 })
-                  .fontColor(this.notifyTargetUid === c.uid ? '#FFFFFF' : this.theme().textPrimary)
-                  .backgroundColor(this.notifyTargetUid === c.uid ? this.theme().accentColor : this.theme().bgSubtle)
-                  .borderRadius(4)
-                  .onClick(() => { this.notifyTargetUid = c.uid; })
-              }, (c: ClientRecord) => c.uid)
-            }
-          }
-          .width('100%')
-          .alignItems(HorizontalAlign.Start)
-        }
-
-        Column({ space: 4 }) {
-          Text('遮罩标题 (MessageMask)').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-          TextInput({ text: this.notifyPayload.MessageMask })
-            .height(36)
-            .fontSize(13)
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgInput)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-            .onChange((v: string) => { this.notifyPayload.MessageMask = v; })
-        }.width('100%').alignItems(HorizontalAlign.Start)
-
-        Column({ space: 4 }) {
-          Text('通知正文 (MessageContent)').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-          TextInput({ text: this.notifyPayload.MessageContent })
-            .height(36)
-            .fontSize(13)
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgInput)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-            .onChange((v: string) => { this.notifyPayload.MessageContent = v; })
-        }.width('100%').alignItems(HorizontalAlign.Start)
-
-        Row({ space: 12 }) {
-          Column({ space: 4 }) {
-            Text('显示持续秒数 (DurationSeconds)').fontSize(12).fontColor(this.theme().textSecondary)
-            TextInput({ text: `${this.notifyPayload.DurationSeconds}` })
-              .height(34)
-              .fontSize(13)
-              .fontColor(this.theme().textPrimary)
-              .backgroundColor(this.theme().bgInput)
-              .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-              .onChange((v: string) => {
-                const n = Number(v);
-                if (!isNaN(n) && n > 0) {
-                  this.notifyPayload.DurationSeconds = n;
-                }
-              })
-          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-
-          Column({ space: 4 }) {
-            Text('重复次数 (RepeatCounts)').fontSize(12).fontColor(this.theme().textSecondary)
-            TextInput({ text: `${this.notifyPayload.RepeatCounts}` })
-              .height(34)
-              .fontSize(13)
-              .fontColor(this.theme().textPrimary)
-              .backgroundColor(this.theme().bgInput)
-              .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-              .onChange((v: string) => {
-                const n = Number(v);
-                if (!isNaN(n) && n > 0) {
-                  this.notifyPayload.RepeatCounts = n;
-                }
-              })
-          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        }
-        .width('100%')
-
-        Flex({ wrap: FlexWrap.Wrap }) {
-          Row({ space: 4 }) {
-            Text('紧急通知').fontSize(13).fontColor(this.theme().dangerColor)
-            Toggle({ type: ToggleType.Switch, isOn: this.notifyPayload.IsEmergency })
-              .onChange((v: boolean) => { this.notifyPayload.IsEmergency = v; })
-          }.margin({ right: 16 })
-
-          Row({ space: 4 }) {
-            Text('启用语音播报').fontSize(13).fontColor(this.theme().textPrimary)
-            Toggle({ type: ToggleType.Switch, isOn: this.notifyPayload.IsSpeechEnabled })
-              .onChange((v: boolean) => { this.notifyPayload.IsSpeechEnabled = v; })
-          }.margin({ right: 16 })
-
-          Row({ space: 4 }) {
-            Text('启用提醒音效').fontSize(13).fontColor(this.theme().textPrimary)
-            Toggle({ type: ToggleType.Switch, isOn: this.notifyPayload.IsSoundEnabled })
-              .onChange((v: boolean) => { this.notifyPayload.IsSoundEnabled = v; })
-          }.margin({ right: 16 })
-
-          Row({ space: 4 }) {
-            Text('启用醒目特效').fontSize(13).fontColor(this.theme().textPrimary)
-            Toggle({ type: ToggleType.Switch, isOn: this.notifyPayload.IsEffectEnabled })
-              .onChange((v: boolean) => { this.notifyPayload.IsEffectEnabled = v; })
-          }.margin({ right: 16 })
-
-          Row({ space: 4 }) {
-            Text('强制窗口置顶').fontSize(13).fontColor(this.theme().textPrimary)
-            Toggle({ type: ToggleType.Switch, isOn: this.notifyPayload.IsTopmost })
-              .onChange((v: boolean) => { this.notifyPayload.IsTopmost = v; })
-          }
-        }
-
-        Button('推送通知')
-          .height(38)
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .width('100%')
-          .fontColor('#FFFFFF')
-          .backgroundColor(this.notifyPayload.IsEmergency ? this.theme().dangerColor : this.theme().accentColor)
-          .borderRadius(4)
-          .onClick(async () => {
-            const target = fixedClientUid.length > 0 ? fixedClientUid : this.notifyTargetUid;
-            if (target === '__broadcast__') {
-              const r = await ApiService.get().broadcastNotification(this.accountId, this.notifyPayload);
-              this.setFeedback(r.ok ? '全员广播通知已下发' : (r.error || '广播失败'), !r.ok);
-            } else {
-              const r = await ApiService.get().sendNotificationToClient(this.accountId, target, this.notifyPayload);
-              this.setFeedback(r.ok ? '单机通知已下发' : (r.error || '发送失败'), !r.ok);
+          NotificationsAndAuditView({
+            accountId: this.accountId,
+            subMode: 'notifications',
+            fixedClientUid: this.activeClient.uid,
+            clients: this.clients,
+            themeMode: this.themeMode,
+            onFeedback: (msg: string, err: boolean) => {
+              this.setFeedback(msg, err);
             }
           })
-      }
-      .width('100%')
-      .padding(18)
-      .backgroundColor(this.theme().bgCard)
-      .borderRadius(8)
-      .border({ width: 1, color: this.theme().borderColor })
-    }
-    .width('100%')
-  }
-
-  @Builder
-  buildAuditLogsView() {
-    Column({ space: 12 }) {
-      Flex({ wrap: FlexWrap.Wrap }) {
-        Button('全部事件')
-          .height(26)
-          .fontSize(11)
-          .margin({ right: 6, bottom: 6 })
-          .fontColor(this.auditEventFilter === 'all' ? '#FFFFFF' : this.theme().textPrimary)
-          .backgroundColor(this.auditEventFilter === 'all' ? this.theme().accentColor : this.theme().bgSubtle)
-          .borderRadius(4)
-          .onClick(() => {
-            this.auditEventFilter = 'all';
-            this.loadAuditLogs();
-          })
-        ForEach(AUDIT_EVENT_LABELS, (def: AuditEventLabelDef) => {
-          Button(def.label)
-            .height(26)
-            .fontSize(11)
-            .margin({ right: 6, bottom: 6 })
-            .fontColor(this.auditEventFilter === `${def.event}` ? '#FFFFFF' : this.theme().textPrimary)
-            .backgroundColor(this.auditEventFilter === `${def.event}` ? this.theme().accentColor : this.theme().bgSubtle)
-            .borderRadius(4)
-            .onClick(() => {
-              this.auditEventFilter = `${def.event}`;
-              this.loadAuditLogs();
-            })
-        }, (def: AuditEventLabelDef) => `${def.event}`)
-      }
-
-      if (this.selectedAuditDetail.length > 0) {
-        Column({ space: 4 }) {
-          Row() {
-            Text('审计事件载荷详情').fontSize(12).fontWeight(FontWeight.Bold).fontColor(this.theme().textPrimary).layoutWeight(1)
-            Button('关闭').height(24).fontSize(11).fontColor(this.theme().textSecondary).backgroundColor(Color.Transparent)
-              .onClick(() => { this.selectedAuditDetail = ''; })
-          }
-          Text(this.selectedAuditDetail)
-            .fontSize(12)
-            .fontFamily('monospace')
-            .fontColor(this.theme().textSecondary)
         }
-        .width('100%')
-        .padding(12)
-        .backgroundColor(this.theme().bgSubtle)
-        .borderRadius(6)
-        .border({ width: 1, color: this.theme().borderColor })
-      }
-
-      if (this.auditLogs.length === 0) {
-        Text('暂无客户端审计事件记录')
-          .fontSize(13)
-          .fontColor(this.theme().textSecondary)
-          .padding(20)
-      } else {
-        ForEach(this.auditLogs, (log: AuditLogItem) => {
-          Row({ space: 10 }) {
-            Text(getAuditEventLabel(log.event))
-              .fontSize(12)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.theme().badgeInfoFg)
-              .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-              .backgroundColor(this.theme().badgeInfoBg)
-              .borderRadius(99)
-            Column({ space: 2 }) {
-              Text(`客户端: ${log.client_id || log.client_uid}`)
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(this.theme().textPrimary)
-              Text(formatTimestamp(log.timestamp_utc || log.created_at))
-                .fontSize(11)
-                .fontColor(this.theme().textSecondary)
-            }
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-
-            Button('查看载荷')
-              .height(26)
-              .fontSize(11)
-              .fontColor(this.theme().textPrimary)
-              .backgroundColor(this.theme().bgSubtle)
-              .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-              .onClick(() => {
-                this.selectedAuditDetail = log.payload || '(无附加载荷)';
-              })
-          }
-          .width('100%')
-          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-          .border({ width: { bottom: 1 }, color: this.theme().borderSubtle })
-        }, (log: AuditLogItem) => `${log.id}`)
       }
     }
     .width('100%')
@@ -1005,7 +668,6 @@ export struct ClientsAndOpsView {
         })
       }
 
-      // Page Header (.page-header) matching web/app/clients, notifications, audit
       Row({ space: 8 }) {
         Column({ space: 4 }) {
           Text(this.subMode === 'notifications' ? '通知推送' : (this.subMode === 'audit' ? '审计日志' : '客户端管理'))
@@ -1026,13 +688,13 @@ export struct ClientsAndOpsView {
         .layoutWeight(1)
 
         if (this.subMode === 'clients') {
-          Button('默认下发档案配置')
-            .height(34)
-            .fontSize(13)
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgCard)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-            .onClick(async () => {
+          HmosIconTextButton(
+            $r('sys.symbol.folder'),
+            '默认下发档案',
+            this.theme().textPrimary,
+            this.theme().bgCard,
+            this.theme().borderColor,
+            async () => {
               this.showDefaultProfilePanel = !this.showDefaultProfilePanel;
               if (this.showDefaultProfilePanel) {
                 const r = await ApiService.get().getDefaultProfile(this.accountId);
@@ -1046,35 +708,22 @@ export struct ClientsAndOpsView {
                   this.bindCred = r.data.cred_resource_name || '';
                 }
               }
-            })
-          Button('刷新状态')
-            .height(34)
-            .fontSize(13)
-            .fontColor('#FFFFFF')
-            .backgroundColor(this.theme().accentColor)
-            .borderRadius(4)
-            .onClick(() => { this.reloadAll(); })
-        } else if (this.subMode === 'audit') {
-          Button('刷新日志')
-            .height(34)
-            .fontSize(13)
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgCard)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-            .onClick(() => { this.loadAuditLogs(); })
-          Button('清空全部日志')
-            .height(34)
-            .fontSize(13)
-            .fontColor(this.theme().dangerColor)
-            .backgroundColor(this.theme().bgCard)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-            .onClick(async () => {
-              const r = await ApiService.get().clearAuditLogs(this.accountId);
-              if (r.ok) {
-                this.auditLogs = [];
-                this.setFeedback('审计日志已清空', false);
-              }
-            })
+            },
+            34,
+            13
+          )
+          HmosIconTextButton(
+            $r('sys.symbol.arrow_clockwise'),
+            '刷新状态',
+            '#FFFFFF',
+            this.theme().accentColor,
+            Color.Transparent,
+            () => {
+              this.reloadAll();
+            },
+            34,
+            13
+          )
         }
       }
       .width('100%')
@@ -1089,12 +738,18 @@ export struct ClientsAndOpsView {
           .borderRadius(4)
       }
 
-      if (this.subMode === 'notifications') {
-        this.buildNotificationComposer('')
-      } else if (this.subMode === 'audit') {
-        this.buildAuditLogsView()
+      if (this.subMode === 'notifications' || this.subMode === 'audit') {
+        NotificationsAndAuditView({
+          accountId: this.accountId,
+          subMode: this.subMode,
+          fixedClientUid: '',
+          clients: this.clients,
+          themeMode: this.themeMode,
+          onFeedback: (msg: string, err: boolean) => {
+            this.setFeedback(msg, err);
+          }
+        })
       } else {
-        // 4 Stat Cards matching web/app/clients/page.tsx
         Row({ space: 12 }) {
           Column({ space: 4 }) {
             Text(`${this.clients.length}`).fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.theme().textPrimary)

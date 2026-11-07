@@ -17,7 +17,9 @@ import {
   NotificationPayload,
   GlobalStats,
   AdminUserItem,
-  AdminAccountItem
+  AdminAccountItem,
+  StoredLoginCert,
+  ResourceVersionItem
 } from '../model/Types';
 
 export class ApiResult<T> {
@@ -35,6 +37,8 @@ export class ApiService {
   public managementUrl: string = 'https://api.miniclassisland.com';
   public adminUrl: string = 'https://admin.miniclassisland.com/api';
   public token: string = '';
+  public tokenExpiresAt: number = 0;
+  public storedCertificate: StoredLoginCert | null = null;
 
   public static get(): ApiService {
     return ApiService.instance;
@@ -274,6 +278,142 @@ export class ApiService {
       await this.request(this.managementUrl, '/token/deactivate', http.RequestMethod.DELETE);
     }
     this.setToken('');
+    this.tokenExpiresAt = 0;
+  }
+
+  // ==================== LOGIN SECURITY CERTIFICATE & REVERSE QR WEB LOGIN ====================
+  public extractExchangeCode(raw: string): string {
+    const trimmed = (raw || '').trim();
+    const prefix = 'miniclassisland://exchange-certificate/';
+    if (trimmed.toLowerCase().startsWith(prefix)) {
+      return decodeURIComponent(trimmed.substring(prefix.length)).trim();
+    }
+    return trimmed;
+  }
+
+  public extractQrLoginCode(raw: string): string {
+    const trimmed = (raw || '').trim();
+    const prefix = 'miniclassisland://qr-login/';
+    if (trimmed.toLowerCase().startsWith(prefix)) {
+      return decodeURIComponent(trimmed.substring(prefix.length)).trim();
+    }
+    return trimmed;
+  }
+
+  public async redeemCertificate(codeOrUri: string): Promise<ApiResult<StoredLoginCert>> {
+    const code = this.extractExchangeCode(codeOrUri);
+    const payload: Record<string, Object> = { 'exchange_code': code };
+    const r = await this.request(this.managementUrl, '/token/certificate/redeem', http.RequestMethod.POST, payload);
+    const out = new ApiResult<StoredLoginCert>();
+    out.ok = r.ok;
+    out.status = r.status;
+    out.error = r.error;
+    if (r.ok && r.data && r.data['certificate']) {
+      const cert = r.data['certificate'] as StoredLoginCert;
+      this.storedCertificate = cert;
+      AppStorage.setOrCreate<string>('storedCertificateJson', JSON.stringify(cert));
+      out.data = cert;
+    }
+    return out;
+  }
+
+  public async requestSessionFromCertificate(ttlSeconds: number = 3600): Promise<ApiResult<Record<string, Object>>> {
+    const cert = this.storedCertificate;
+    if (!cert) {
+      const err = new ApiResult<Record<string, Object>>();
+      err.ok = false;
+      err.error = '尚未保存登录安全证书';
+      return err;
+    }
+    const clampedTtl = Math.max(60, Math.min(3600, ttlSeconds));
+    const payload: Record<string, Object> = {
+      'cert_id': cert.cert_id,
+      'cert_secret': cert.cert_secret,
+      'ttl': clampedTtl
+    };
+    const r = await this.request(this.managementUrl, '/token/certificate/session', http.RequestMethod.POST, payload);
+    if (r.ok && r.data) {
+      const tok = String(r.data['token'] || '');
+      if (tok.length > 0) {
+        this.setToken(tok);
+        this.tokenExpiresAt = Number(r.data['expires_at'] || 0);
+      }
+    }
+    return r;
+  }
+
+  public async rotateCertificateIfEligible(): Promise<ApiResult<StoredLoginCert>> {
+    const cert = this.storedCertificate;
+    if (!cert) {
+      const err = new ApiResult<StoredLoginCert>();
+      err.ok = false;
+      err.error = '尚未保存登录安全证书';
+      return err;
+    }
+    const payload: Record<string, Object> = {
+      'cert_id': cert.cert_id,
+      'cert_secret': cert.cert_secret
+    };
+    const r = await this.request(this.managementUrl, '/token/certificate/rotate', http.RequestMethod.POST, payload);
+    const out = new ApiResult<StoredLoginCert>();
+    out.ok = r.ok;
+    out.status = r.status;
+    out.error = r.error;
+    if (r.ok && r.data && r.data['certificate']) {
+      const nextCert = r.data['certificate'] as StoredLoginCert;
+      this.storedCertificate = nextCert;
+      AppStorage.setOrCreate<string>('storedCertificateJson', JSON.stringify(nextCert));
+      out.data = nextCert;
+    }
+    return out;
+  }
+
+  public async issueSecurityCertificate(
+    password: string,
+    totpCode: string,
+    recoveryCode: string,
+    deviceName: string
+  ): Promise<ApiResult<Record<string, Object>>> {
+    const payload: Record<string, Object> = {
+      'password': password,
+      'device_name': deviceName || 'HarmonyOS 客户端'
+    };
+    if (totpCode.trim().length > 0) {
+      payload['totp_code'] = totpCode.trim();
+    }
+    if (recoveryCode.trim().length > 0) {
+      payload['recovery_code'] = recoveryCode.trim();
+    }
+    return this.request(this.managementUrl, '/user/security/certificate/issue', http.RequestMethod.POST, payload);
+  }
+
+  public async listSecurityCertificates(): Promise<ApiResult<Record<string, Object>[]>> {
+    const r = await this.request(this.managementUrl, '/user/security/certificates', http.RequestMethod.GET);
+    const out = new ApiResult<Record<string, Object>[]>();
+    out.ok = r.ok;
+    out.error = r.error;
+    if (r.ok && r.data) {
+      out.data = (r.data['certificates'] as Record<string, Object>[]) || [];
+    }
+    return out;
+  }
+
+  public async revokeSecurityCertificate(certId: string): Promise<ApiResult<Record<string, Object>>> {
+    return this.request(
+      this.managementUrl,
+      `/user/security/certificate/${encodeURIComponent(certId)}`,
+      http.RequestMethod.DELETE
+    );
+  }
+
+  public async authorizeWebQrLogin(codeOrUri: string): Promise<ApiResult<Record<string, Object>>> {
+    const code = this.extractQrLoginCode(codeOrUri);
+    const payload: Record<string, Object> = { 'code': code };
+    if (this.storedCertificate !== null) {
+      payload['cert_id'] = this.storedCertificate.cert_id;
+      payload['cert_secret'] = this.storedCertificate.cert_secret;
+    }
+    return this.request(this.managementUrl, '/token/qr-login/authorize', http.RequestMethod.POST, payload);
   }
 
   // ==================== TENANT ACCOUNTS ====================
@@ -402,8 +542,8 @@ export class ApiService {
     return this.request(this.managementUrl, '/account/invitation/accept', http.RequestMethod.POST, payload);
   }
 
-  // ==================== 7 PROFILE RESOURCES ====================
-  public async listResources(accountId: number, resourceType: string): Promise<ApiResult<ResourceItem[]>> {
+  // ==================== 7 PROFILE RESOURCES & VERSION HISTORY ====================
+  public async listResources(accountId: number | string, resourceType: string): Promise<ApiResult<ResourceItem[]>> {
     const r = await this.request(this.managementUrl, `/account/${accountId}/${resourceType}/list`, http.RequestMethod.GET);
     const out = new ApiResult<ResourceItem[]>();
     out.ok = r.ok;
@@ -415,15 +555,33 @@ export class ApiService {
     return out;
   }
 
+  public async readResourceRaw(
+    accountId: number | string,
+    resourceType: string,
+    resourceName: string
+  ): Promise<ApiResult<string>> {
+    return this.getRawJson(
+      this.managementUrl,
+      `/account/${accountId}/${resourceType}/${encodeURIComponent(resourceName)}.json`
+    );
+  }
+
   public async createResource(
-    accountId: number,
+    accountId: number | string,
     resourceType: string,
     resourceName: string,
     content: string
   ): Promise<ApiResult<ResourceItem>> {
+    let parsedContent: Record<string, Object> = {};
+    try {
+      parsedContent = JSON.parse(content) as Record<string, Object>;
+    } catch (_e) {
+      parsedContent = {};
+    }
     const payload: Record<string, Object> = {
+      'name': resourceName,
       'resource_name': resourceName,
-      'content': content
+      'content': parsedContent
     };
     const r = await this.request(this.managementUrl, `/account/${accountId}/${resourceType}/create`, http.RequestMethod.POST, payload);
     const out = new ApiResult<ResourceItem>();
@@ -437,12 +595,18 @@ export class ApiService {
   }
 
   public async writeResource(
-    accountId: number,
+    accountId: number | string,
     resourceType: string,
     resourceName: string,
     content: string
   ): Promise<ApiResult<ResourceItem>> {
-    const payload: Record<string, Object> = { 'content': content };
+    let parsedContent: Record<string, Object> = {};
+    try {
+      parsedContent = JSON.parse(content) as Record<string, Object>;
+    } catch (_e) {
+      parsedContent = {};
+    }
+    const payload: Record<string, Object> = { 'content': parsedContent };
     const r = await this.request(
       this.managementUrl,
       `/account/${accountId}/${resourceType}/${encodeURIComponent(resourceName)}/write`,
@@ -459,7 +623,7 @@ export class ApiService {
     return out;
   }
 
-  public async deleteResource(accountId: number, resourceType: string, resourceName: string): Promise<ApiResult<Record<string, Object>>> {
+  public async deleteResource(accountId: number | string, resourceType: string, resourceName: string): Promise<ApiResult<Record<string, Object>>> {
     return this.request(
       this.managementUrl,
       `/account/${accountId}/${resourceType}/${encodeURIComponent(resourceName)}/deleteData`,
@@ -467,8 +631,47 @@ export class ApiService {
     );
   }
 
-  public async encodePasswordCredential(accountId: number, password: string): Promise<ApiResult<string>> {
-    const payload: Record<string, Object> = { 'password': password };
+  public async listResourceHistory(
+    accountId: number | string,
+    resourceType: string,
+    resourceName: string
+  ): Promise<ApiResult<ResourceVersionItem[]>> {
+    const r = await this.request(
+      this.managementUrl,
+      `/account/${accountId}/${resourceType}/${encodeURIComponent(resourceName)}/history`,
+      http.RequestMethod.GET
+    );
+    const out = new ApiResult<ResourceVersionItem[]>();
+    out.ok = r.ok;
+    out.error = r.error;
+    if (r.ok && r.data) {
+      out.data = (r.data['versions'] as ResourceVersionItem[]) || [];
+    }
+    return out;
+  }
+
+  public async readResourceHistoryVersion(
+    accountId: number | string,
+    resourceType: string,
+    resourceName: string,
+    version: number
+  ): Promise<ApiResult<ResourceVersionItem>> {
+    const r = await this.request(
+      this.managementUrl,
+      `/account/${accountId}/${resourceType}/${encodeURIComponent(resourceName)}/history/${version}`,
+      http.RequestMethod.GET
+    );
+    const out = new ApiResult<ResourceVersionItem>();
+    out.ok = r.ok;
+    out.error = r.error;
+    if (r.ok && r.data) {
+      out.data = JSON.parse(r.rawText) as ResourceVersionItem;
+    }
+    return out;
+  }
+
+  public async encodePasswordCredential(accountId: number | string, password: string): Promise<ApiResult<string>> {
+    const payload: Record<string, Object> = { 'raw': password, 'password': password };
     const r = await this.request(this.managementUrl, `/account/${accountId}/credentials/encode`, http.RequestMethod.POST, payload);
     const out = new ApiResult<string>();
     out.ok = r.ok;
@@ -479,7 +682,7 @@ export class ApiService {
     return out;
   }
 
-  public async getManagementPresetJson(accountId: number): Promise<ApiResult<string>> {
+  public async getManagementPresetJson(accountId: number | string): Promise<ApiResult<string>> {
     return this.getRawJson(this.managementUrl, `/account/${accountId}/ManagementPreset.json`);
   }
 

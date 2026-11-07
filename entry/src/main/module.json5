@@ -45,6 +45,24 @@
             "actions": [
               "action.system.home"
             ]
+          },
+          {
+            "entities": [
+              "entity.system.browsable"
+            ],
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {
+                "scheme": "miniclassisland",
+                "host": "exchange-certificate"
+              },
+              {
+                "scheme": "miniclassisland",
+                "host": "qr-login"
+              }
+            ]
           }
         ]
       }

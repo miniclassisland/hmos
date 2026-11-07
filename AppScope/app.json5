@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "org.miniopensource.miniclassisland",
     "vendor": "MINIOpenSource",
-    "versionCode": 1000000,
-    "versionName": "1.0.0",
+    "versionCode": 2004000,
+    "versionName": "2.4.0",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }

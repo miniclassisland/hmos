@@ -337,22 +337,86 @@ export interface AdminAccountItem {
   updated_at: number;
 }
 
+export interface StoredLoginCert {
+  cert_id: string;
+  cert_secret: string;
+  generation: number;
+  max_generation: number;
+  issued_at: number;
+  expires_at: number;
+  user_id?: number;
+}
+
+export interface ResourceVersionItem {
+  version: number;
+  content: string;
+  created_at: number;
+}
+
 export interface BuiltinComponentDef {
   id: string;
   name: string;
   desc: string;
+  isContainer: boolean;
 }
 
+export const EMPTY_GUID: string = '00000000-0000-0000-0000-000000000000';
+
 export const BUILTIN_COMPONENTS: BuiltinComponentDef[] = [
-  { id: '1507b9a2-7884-4937-9499-4a1b54f4c855', name: '课表', desc: '显示当前课程表与上下课状态' },
-  { id: '908c5531-f80c-4c32-89d2-f935455d65c8', name: '时钟', desc: '显示当前精确时间（修正后）' },
-  { id: 'f4c9a059-55b0-42b0-9b09-f506e068d801', name: '日期', desc: '显示今日日期与星期' },
-  { id: '6fe32b24-b78c-4c62-b8c4-3f6838d167a8', name: '天气简报', desc: '显示实时天气温度与预警' },
-  { id: 'a79923a8-71d0-43b9-b9b2-611c8bf7186a', name: '倒计时', desc: '显示距离特定日期剩余天数' },
-  { id: 'df3f8295-21F6-482e-ada2-fa0e52b2620f', name: '自定义文本', desc: '显示固定标语或提示文本' },
-  { id: 'c2f3f06e-b62c-46a0-a080-322c0c492d91', name: '分隔线', desc: '用于组件间的视觉分隔' },
-  { id: 'b51c85d7-2069-413b-8347-5a8116eb209b', name: '轮播组件容器', desc: '定时轮播多个子组件' },
-  { id: 'e3148204-5f12-40a2-9c35-2b259c039a2b', name: '分组容器', desc: '将多个组件组合显示' },
+  { id: 'df3f8295-21f6-482e-ada2-f0ab5f19a9d6', name: '文本', desc: '显示自定义文本内容，支持多行和大字模式。', isContainer: false },
+  { id: '1e036932-96d9-4f87-a8b1-b8673a90603c', name: '分隔线', desc: '在组件之间显示分割线。', isContainer: false },
+  { id: '7c645d35-8151-48ba-b4ac-15017460d994', name: '课程表', desc: '显示当前的课程表信息。', isContainer: false },
+  { id: '9812679e-482b-4729-8854-02d20999290d', name: '时钟', desc: '显示当前时间，支持秒针和闪烁效果。', isContainer: false },
+  { id: 'b65a523e-c179-461b-9c2d-99f38c251153', name: '日期', desc: '显示今天的日期和星期。', isContainer: false },
+  { id: '54e81232-9f91-4526-851d-4d5f05079438', name: '倒计时', desc: '显示距离指定日期的剩余天数。', isContainer: false },
+  { id: 'ca495086-e297-4beb-9603-c5c1c1a8551e', name: '天气简报', desc: '显示实时天气状况和气象预警。', isContainer: false },
+  { id: '991c7d41-6191-4435-b25a-034a54694041', name: '分组容器', desc: '将多个组件组合在一起显示。', isContainer: true },
+  { id: 'c08f0284-8216-44d3-85a4-33a90a2d6d62', name: '滚动组件容器', desc: '使内部组件循环滚动显示。', isContainer: true },
+  { id: 'ea93c7e9-f173-4f18-a93a-1607a217a1a8', name: '轮播组件容器', desc: '轮流播放内部的多个组件。', isContainer: true },
+  { id: 'd2f52a16-7721-4032-b48c-227a5763a015', name: '今日课表', desc: '通过跑马灯或摘要展示全天课程。', isContainer: false },
+];
+
+export const LEGACY_COMPONENT_GUID_MAP: Record<string, string> = {
+  '1507b9a2-7884-4937-9499-4a1b54f4c855': '7c645d35-8151-48ba-b4ac-15017460d994',
+  '908c5531-f80c-4c32-89d2-f935455d65c8': '9812679e-482b-4729-8854-02d20999290d',
+  'f4c9a059-55b0-42b0-9b09-f506e068d801': 'b65a523e-c179-461b-9c2d-99f38c251153',
+  '6fe32b24-b78c-4c62-b8c4-3f6838d167a8': 'ca495086-e297-4beb-9603-c5c1c1a8551e',
+  'a79923a8-71d0-43b9-b9b2-611c8bf7186a': '54e81232-9f91-4526-851d-4d5f05079438',
+  'df3f8295-21f6-482e-ada2-fa0e52b2620f': 'df3f8295-21f6-482e-ada2-f0ab5f19a9d6',
+  'c2f3f06e-b62c-46a0-a080-322c0c492d91': '1e036932-96d9-4f87-a8b1-b8673a90603c',
+  'b51c85d7-2069-413b-8347-5a8116eb209b': 'ea93c7e9-f173-4f18-a93a-1607a217a1a8',
+  'e3148204-5f12-40a2-9c35-2b259c039a2b': '991c7d41-6191-4435-b25a-034a54694041'
+};
+
+export function normalizeComponentId(rawId: string): string {
+  const lower = (rawId || '').trim().toLowerCase();
+  return LEGACY_COMPONENT_GUID_MAP[lower] || lower;
+}
+
+export function findComponentDef(rawId: string): BuiltinComponentDef | null {
+  const norm = normalizeComponentId(rawId);
+  for (let i = 0; i < BUILTIN_COMPONENTS.length; i++) {
+    if (BUILTIN_COMPONENTS[i].id.toLowerCase() === norm) {
+      return BUILTIN_COMPONENTS[i];
+    }
+  }
+  return null;
+}
+
+export interface BuiltinActionDef {
+  id: string;
+  name: string;
+}
+
+export const BUILTIN_ACTIONS: BuiltinActionDef[] = [
+  { id: 'classisland.os.run', name: '运行程序 / 打开文件 / 网页' },
+  { id: 'classisland.showNotification', name: '显示提醒通知' },
+  { id: 'classisland.broadcastSignal', name: '广播触发信号' },
+  { id: 'classisland.weather.Important', name: '播报天气简报' },
+  { id: 'classisland.settings.CurrentComponentConfig', name: '切换组件配置方案' },
+  { id: 'classisland.settings.Theme', name: '切换应用明暗主题' },
+  { id: 'classisland.settings.WindowDockingLocation', name: '切换主界面停靠位置' },
+  { id: 'classisland.app.quit', name: '退出 ClassIsland' },
 ];
 
 export interface AuditEventLabelDef {

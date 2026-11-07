@@ -1,4 +1,4 @@
-import { UIAbility } from '@kit.AbilityKit';
+import { UIAbility, Want, AbilityConstant } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { display } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
@@ -6,6 +6,26 @@ import { deviceInfo } from '@kit.BasicServicesKit';
 export default class EntryAbility extends UIAbility {
   private mainWindow: window.Window | null = null;
   private density: number = 1.5;
+
+  private handleWantDeepLink(want: Want): void {
+    const uri = (want.uri || '').trim();
+    if (!uri) {
+      return;
+    }
+    if (uri.toLowerCase().startsWith('miniclassisland://exchange-certificate/')) {
+      AppStorage.setOrCreate<string>('pendingCertUri', uri);
+    } else if (uri.toLowerCase().startsWith('miniclassisland://qr-login/')) {
+      AppStorage.setOrCreate<string>('pendingQrLoginUri', uri);
+    }
+  }
+
+  onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.handleWantDeepLink(want);
+  }
+
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.handleWantDeepLink(want);
+  }
 
   private refreshDensity(): void {
     try {
