@@ -253,7 +253,7 @@ export struct SecurityAndAdminView {
                 this.certIssueDeviceName
               );
               if (r.ok && r.data) {
-                const code = String(r.data['exchange_code'] || '');
+                const code = String(r.data['code'] || r.data['exchange_code'] || '');
                 const deepLink = String(r.data['deeplink'] || `miniclassisland://exchange-certificate/${code}`);
                 this.issuedCertDeepLink = deepLink;
                 this.certIssuePassword = '';

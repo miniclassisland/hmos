@@ -147,15 +147,17 @@ struct Index {
     const api = ApiService.get();
     const r = await api.redeemCertificate(uri);
     if (!r.ok || !r.data) {
-      this.deepLinkBannerMsg = r.error || '通过 DeepLink 兑换登录安全证书失败';
+      this.deepLinkBannerMsg = r.error || '通过深链接兑换登录安全证书失败';
       return;
     }
-    const sRes = await api.requestSessionFromCertificate(3600);
-    if (sRes.ok) {
+    if (api.token.length === 0) {
+      await api.requestSessionFromCertificate(3600);
+    }
+    if (api.token.length > 0) {
       const pRes = await api.getProfile();
       if (pRes.ok && pRes.data) {
         await this.onAuthSuccess(api.token, pRes.data);
-        this.deepLinkBannerMsg = `已通过 DeepLink 下载安全证书并自动登录 (代数 ${r.data.generation}/${r.data.max_generation})`;
+        this.deepLinkBannerMsg = `已下载安全证书并自动登录`;
       }
     }
   }

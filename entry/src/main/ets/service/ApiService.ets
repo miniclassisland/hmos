@@ -168,7 +168,7 @@ export class ApiService {
 
   public async login(username: string, password: string, useAdminEndpoint: boolean): Promise<ApiResult<AuthResponse>> {
     const base = useAdminEndpoint ? this.adminUrl : this.managementUrl;
-    const payload: Record<string, Object> = { 'username': username, 'password': password };
+    const payload: Record<string, Object> = { 'email': username, 'username': username, 'password': password };
     const r = await this.request(base, '/user/auth', http.RequestMethod.POST, payload);
     const out = new ApiResult<AuthResponse>();
     out.ok = r.ok;
@@ -198,7 +198,7 @@ export class ApiService {
 
   public async verifyTotp(totpSession: string, code: string, useAdminEndpoint: boolean): Promise<ApiResult<AuthResponse>> {
     const base = useAdminEndpoint ? this.adminUrl : this.managementUrl;
-    const payload: Record<string, Object> = { 'totp_session': totpSession, 'code': code };
+    const payload: Record<string, Object> = { 'temp_token': totpSession, 'totp_session': totpSession, 'code': code };
     const r = await this.request(base, '/user/2fa/totp/verify', http.RequestMethod.POST, payload);
     const out = new ApiResult<AuthResponse>();
     out.ok = r.ok;
@@ -216,7 +216,7 @@ export class ApiService {
     useAdminEndpoint: boolean
   ): Promise<ApiResult<AuthResponse>> {
     const base = useAdminEndpoint ? this.adminUrl : this.managementUrl;
-    const payload: Record<string, Object> = { 'totp_session': totpSession, 'recovery_code': recoveryCode };
+    const payload: Record<string, Object> = { 'temp_token': totpSession, 'totp_session': totpSession, 'recovery_code': recoveryCode };
     const r = await this.request(base, '/user/2fa/totp/recover', http.RequestMethod.POST, payload);
     const out = new ApiResult<AuthResponse>();
     out.ok = r.ok;
@@ -229,7 +229,7 @@ export class ApiService {
   }
 
   public async getProfile(): Promise<ApiResult<UserInfo>> {
-    const r = await this.request(this.managementUrl, '/user/profile', http.RequestMethod.GET);
+    const r = await this.request(this.managementUrl, '/user/info', http.RequestMethod.GET);
     const out = new ApiResult<UserInfo>();
     out.ok = r.ok;
     out.status = r.status;
@@ -242,12 +242,17 @@ export class ApiService {
   }
 
   public async updateProfile(displayName: string, email: string, username: string): Promise<ApiResult<Record<string, Object>>> {
-    const payload: Record<string, Object> = {
-      'display_name': displayName,
-      'email': email,
-      'username': username
-    };
-    return this.request(this.managementUrl, '/user/profile', http.RequestMethod.PUT, payload);
+    let lastRes = new ApiResult<Record<string, Object>>();
+    lastRes.ok = true;
+    if (displayName.trim().length > 0) {
+      const dnPayload: Record<string, Object> = { 'display_name': displayName.trim() };
+      lastRes = await this.request(this.managementUrl, '/user/info/display-name', http.RequestMethod.POST, dnPayload);
+    }
+    if (lastRes.ok && username.trim().length > 0) {
+      const unPayload: Record<string, Object> = { 'username': username.trim() };
+      lastRes = await this.request(this.managementUrl, '/user/info/username', http.RequestMethod.POST, unPayload);
+    }
+    return lastRes;
   }
 
   public async changePassword(oldPassword: string, newPassword: string): Promise<ApiResult<Record<string, Object>>> {
@@ -255,7 +260,7 @@ export class ApiService {
       'old_password': oldPassword,
       'new_password': newPassword
     };
-    return this.request(this.managementUrl, '/user/security/password', http.RequestMethod.POST, payload);
+    return this.request(this.managementUrl, '/user/info/password/change', http.RequestMethod.POST, payload);
   }
 
   public async enableTotp(): Promise<ApiResult<Record<string, Object>>> {
@@ -269,13 +274,14 @@ export class ApiService {
   }
 
   public async disableTotp(password: string, code: string): Promise<ApiResult<Record<string, Object>>> {
-    const payload: Record<string, Object> = { 'password': password, 'code': code };
+    const payload: Record<string, Object> = { 'password': password, 'totp_code': code, 'code': code };
     return this.request(this.managementUrl, '/user/2fa/totp/disable', http.RequestMethod.POST, payload);
   }
 
   public async logout(): Promise<void> {
     if (this.token.length > 0) {
-      await this.request(this.managementUrl, '/token/deactivate', http.RequestMethod.DELETE);
+      const empty: Record<string, Object> = {};
+      await this.request(this.managementUrl, '/token/deactivate', http.RequestMethod.POST, empty);
     }
     this.setToken('');
     this.tokenExpiresAt = 0;
@@ -302,7 +308,7 @@ export class ApiService {
 
   public async redeemCertificate(codeOrUri: string): Promise<ApiResult<StoredLoginCert>> {
     const code = this.extractExchangeCode(codeOrUri);
-    const payload: Record<string, Object> = { 'exchange_code': code };
+    const payload: Record<string, Object> = { 'code': code, 'exchange_code': code };
     const r = await this.request(this.managementUrl, '/token/certificate/redeem', http.RequestMethod.POST, payload);
     const out = new ApiResult<StoredLoginCert>();
     out.ok = r.ok;
@@ -313,6 +319,12 @@ export class ApiService {
       this.storedCertificate = cert;
       AppStorage.setOrCreate<string>('storedCertificateJson', JSON.stringify(cert));
       out.data = cert;
+      const tok = String(r.data['token'] || '');
+      if (tok.length > 0) {
+        this.setToken(tok);
+        const expIn = Number(r.data['expires_in'] || 3600);
+        this.tokenExpiresAt = Math.floor(Date.now() / 1000) + expIn;
+      }
     }
     return out;
   }
@@ -384,25 +396,30 @@ export class ApiService {
     if (recoveryCode.trim().length > 0) {
       payload['recovery_code'] = recoveryCode.trim();
     }
-    return this.request(this.managementUrl, '/user/security/certificate/issue', http.RequestMethod.POST, payload);
+    return this.request(this.managementUrl, '/user/certificate/issue', http.RequestMethod.POST, payload);
   }
 
   public async listSecurityCertificates(): Promise<ApiResult<Record<string, Object>[]>> {
-    const r = await this.request(this.managementUrl, '/user/security/certificates', http.RequestMethod.GET);
+    const r = await this.request(this.managementUrl, '/user/certificate/list', http.RequestMethod.GET);
     const out = new ApiResult<Record<string, Object>[]>();
     out.ok = r.ok;
     out.error = r.error;
     if (r.ok && r.data) {
-      out.data = (r.data['certificates'] as Record<string, Object>[]) || [];
+      out.data = (r.data['items'] as Record<string, Object>[]) || (r.data['certificates'] as Record<string, Object>[]) || [];
     }
     return out;
   }
 
   public async revokeSecurityCertificate(certId: string): Promise<ApiResult<Record<string, Object>>> {
+    const payload: Record<string, Object> = {
+      'cert_id': certId,
+      'revoke_all': false
+    };
     return this.request(
       this.managementUrl,
-      `/user/security/certificate/${encodeURIComponent(certId)}`,
-      http.RequestMethod.DELETE
+      '/user/certificate/revoke',
+      http.RequestMethod.POST,
+      payload
     );
   }
 

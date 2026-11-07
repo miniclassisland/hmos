@@ -190,6 +190,14 @@ export struct AuthAndAccountView {
     }
     this.storedCert = r.data;
     this.certExchangeInput = '';
+    if (ApiService.get().token.length > 0) {
+      const pRes = await ApiService.get().getProfile();
+      this.isSubmitting = false;
+      if (pRes.ok && pRes.data) {
+        this.onAuthCompleted(ApiService.get().token, pRes.data);
+        return;
+      }
+    }
     await this.handleUseStoredCertificateSession();
   }
 
