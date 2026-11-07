@@ -9,6 +9,7 @@ import {
 import { WebThemePalette, getWebPalette } from '../model/Theme';
 import { ApiService } from '../service/ApiService';
 import { HmosIconButton, HmosIconTextButton, HmosSymbolIcon } from './HmosIcons';
+import { scanBarcode, scanCore } from '@kit.ScanKit';
 
 @Component
 export struct SecurityAndAdminView {
@@ -351,7 +352,7 @@ export struct SecurityAndAdminView {
 
           Row({ space: 8 }) {
             TextInput({
-              placeholder: '输入兑换码或 miniclassisland://exchange-certificate/{Code} 下载证书到本机',
+              placeholder: '粘贴兑换链接或直接点击右侧扫码保存至本机',
               text: this.localRedeemCodeInput
             })
               .height(34)
@@ -363,13 +364,33 @@ export struct SecurityAndAdminView {
               .onChange((v: string) => { this.localRedeemCodeInput = v; })
             HmosIconTextButton(
               $r('sys.symbol.qrcode'),
-              '兑换并保存至本机',
+              '扫码或兑换',
               '#FFFFFF',
               this.theme().accentColor,
               Color.Transparent,
               async () => {
-                if (!this.localRedeemCodeInput.trim()) { return; }
-                const r = await ApiService.get().redeemCertificate(this.localRedeemCodeInput.trim());
+                let codeToUse = this.localRedeemCodeInput.trim();
+                if (!codeToUse) {
+                  try {
+                    const options: scanBarcode.ScanOptions = {
+                      scanTypes: [scanCore.ScanType.ALL],
+                      enableMultiMode: false,
+                      enableAlbum: true
+                    };
+                    const scanRes: scanBarcode.ScanResult = await scanBarcode.startScanForResult(getContext(this), options);
+                    codeToUse = (scanRes.originalValue || '').trim();
+                  } catch (_e) {
+                    this.notify('未能启动系统扫码器', true);
+                    return;
+                  }
+                }
+                if (!codeToUse) { return; }
+                if (codeToUse.toLowerCase().startsWith('miniclassisland://qr-login')) {
+                  const qrRes = await ApiService.get().authorizeWebQrLogin(codeToUse);
+                  this.notify(qrRes.ok ? '已成功授权网页端扫码登录' : (qrRes.error || '授权失败'), !qrRes.ok);
+                  return;
+                }
+                const r = await ApiService.get().redeemCertificate(codeToUse);
                 if (r.ok && r.data) {
                   this.localStoredCert = r.data;
                   this.localRedeemCodeInput = '';

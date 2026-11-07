@@ -12,10 +12,16 @@ export default class EntryAbility extends UIAbility {
     if (!uri) {
       return;
     }
-    if (uri.toLowerCase().startsWith('miniclassisland://exchange-certificate/')) {
+    const lower = uri.toLowerCase();
+    if (lower.startsWith('miniclassisland://exchange-certificate')) {
+      AppStorage.setOrCreate<string>('pendingCertUri', '');
       AppStorage.setOrCreate<string>('pendingCertUri', uri);
-    } else if (uri.toLowerCase().startsWith('miniclassisland://qr-login/')) {
+    } else if (lower.startsWith('miniclassisland://qr-login')) {
+      AppStorage.setOrCreate<string>('pendingQrLoginUri', '');
       AppStorage.setOrCreate<string>('pendingQrLoginUri', uri);
+    } else if (lower.startsWith('miniclassisland://')) {
+      AppStorage.setOrCreate<string>('pendingCertUri', '');
+      AppStorage.setOrCreate<string>('pendingCertUri', uri);
     }
   }
 

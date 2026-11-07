@@ -7,6 +7,7 @@ import {
 import { WebThemePalette, getWebPalette } from '../model/Theme';
 import { ApiService } from '../service/ApiService';
 import { HmosIconButton, HmosIconTextButton, HmosSymbolIcon } from './HmosIcons';
+import { scanBarcode, scanCore } from '@kit.ScanKit';
 
 @Component
 export struct AuthAndAccountView {
@@ -245,6 +246,32 @@ export struct AuthAndAccountView {
     }
   }
 
+  private async startNativeQrScan(): Promise<void> {
+    this.authError = '';
+    this.authInfoMsg = '';
+    try {
+      const options: scanBarcode.ScanOptions = {
+        scanTypes: [scanCore.ScanType.ALL],
+        enableMultiMode: false,
+        enableAlbum: true
+      };
+      const result: scanBarcode.ScanResult = await scanBarcode.startScanForResult(getContext(this), options);
+      const scanned = (result.originalValue || '').trim();
+      if (!scanned) {
+        return;
+      }
+      if (scanned.toLowerCase().startsWith('miniclassisland://qr-login')) {
+        this.qrLoginCodeInput = scanned;
+        await this.handleAuthorizeQrWebLogin();
+      } else {
+        this.certExchangeInput = scanned;
+        await this.handleRedeemAndLogin();
+      }
+    } catch (_err) {
+      this.authError = '未能启动系统扫码器，请检查设备相机状态或从相册识别二维码';
+    }
+  }
+
   @Builder
   buildThemeModeToggle(onBlueBg: boolean) {
     Row({ space: 2 }) {
@@ -376,7 +403,7 @@ export struct AuthAndAccountView {
 
         Row({ space: 6 }) {
           TextInput({
-            placeholder: 'miniclassisland://exchange-certificate/{Code} 或兑换码',
+            placeholder: '粘贴安全证书兑换链接或兑换码',
             text: this.certExchangeInput
           })
             .height(34)
@@ -389,12 +416,16 @@ export struct AuthAndAccountView {
 
           HmosIconTextButton(
             $r('sys.symbol.qrcode'),
-            '兑换证书',
+            '扫码或兑换',
             '#FFFFFF',
             this.theme().accentColor,
             Color.Transparent,
             () => {
-              this.handleRedeemAndLogin();
+              if (this.certExchangeInput.trim().length > 0) {
+                this.handleRedeemAndLogin();
+              } else {
+                this.startNativeQrScan();
+              }
             },
             34,
             12
@@ -423,7 +454,7 @@ export struct AuthAndAccountView {
 
           Row({ space: 6 }) {
             TextInput({
-              placeholder: 'miniclassisland://qr-login/{Code}',
+              placeholder: '粘贴网页登录二维码链接或直接点击右侧扫码',
               text: this.qrLoginCodeInput
             })
               .height(34)
@@ -435,13 +466,17 @@ export struct AuthAndAccountView {
               .onChange((v: string) => { this.qrLoginCodeInput = v; })
 
             HmosIconTextButton(
-              $r('sys.symbol.checkmark_shield'),
-              '确认授权网页登录',
+              $r('sys.symbol.qrcode'),
+              '扫码授权网页登录',
               '#FFFFFF',
               this.theme().accentColor,
               Color.Transparent,
               () => {
-                this.handleAuthorizeQrWebLogin();
+                if (this.qrLoginCodeInput.trim().length > 0) {
+                  this.handleAuthorizeQrWebLogin();
+                } else {
+                  this.startNativeQrScan();
+                }
               },
               34,
               12
@@ -476,12 +511,7 @@ export struct AuthAndAccountView {
                 .fontWeight(FontWeight.Bold)
                 .fontColor(this.theme().textPrimary)
                 .textAlign(TextAlign.Center)
-              Text(
-                this.loginStep === 'email' ? '输入您的邮箱以继续' :
-                this.loginStep === 'login' ? '欢迎回来，请登录' :
-                this.loginStep === 'register' ? '创建一个新账户' :
-                this.loginStep === 'totp' ? '安全验证' : '系统初始化配置'
-              )
+              Text('请使用扫码器扫描登录安全证书二维码完成移动端登录')
                 .fontSize(14)
                 .fontColor(this.theme().textSecondary)
                 .textAlign(TextAlign.Center)
@@ -519,16 +549,6 @@ export struct AuthAndAccountView {
                 }.alignItems(HorizontalAlign.Start)
 
                 Row({ space: 8 }) {
-                  Button('初始化向导')
-                    .height(28)
-                    .fontSize(11)
-                    .fontColor(this.theme().textSecondary)
-                    .backgroundColor(this.theme().bgSubtle)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onClick(() => {
-                      this.loginStep = this.loginStep === 'oobe' ? 'email' : 'oobe';
-                      this.showEndpointConfig = false;
-                    })
                   Blank()
                   Button('完成')
                     .height(28)
@@ -568,296 +588,81 @@ export struct AuthAndAccountView {
               .borderRadius(4)
             }
 
-            if (this.loginStep === 'email') {
-              Column({ space: 14 }) {
-                Column({ space: 6 }) {
-                  Text('邮箱地址').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: 'you@example.com', text: this.emailInput })
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.emailInput = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.isSubmitting ? '请稍候...' : '继续')
-                  .width('100%')
-                  .height(38)
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
-                  .backgroundColor(this.theme().accentColor)
-                  .borderRadius(4)
-                  .onClick(() => {
-                    this.handleEmailCheck();
-                  })
-
-                Text('使用用户名与密码直接登录')
+            if (this.storedCert !== null) {
+              Column({ space: 6 }) {
+                Text(`已存登录安全证书 · 第 ${this.storedCert.generation}/${this.storedCert.max_generation} 代`)
                   .fontSize(12)
-                  .fontColor(this.theme().accentColor)
-                  .padding(4)
-                  .onClick(() => {
-                    this.loginStep = 'login';
-                  })
-              }
-              .width('100%')
-            } else if (this.loginStep === 'login') {
-              Column({ space: 14 }) {
-                Column({ space: 6 }) {
-                  Text('邮箱或用户名').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '输入邮箱或用户名', text: this.loginUsername || this.emailInput })
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => {
-                      this.loginUsername = v;
-                      this.emailInput = v;
-                    })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Column({ space: 6 }) {
-                  Text('密码').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '输入密码', text: this.loginPassword })
-                    .type(InputType.Password)
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.loginPassword = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.isSubmitting ? '登录中...' : '登录')
-                  .width('100%')
-                  .height(38)
-                  .fontSize(14)
                   .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
-                  .backgroundColor(this.theme().accentColor)
-                  .borderRadius(4)
-                  .onClick(() => {
-                    this.handleLogin();
-                  })
-
-                Button('使用其他邮箱')
-                  .width('100%')
-                  .height(34)
-                  .fontSize(13)
+                  .fontColor(this.theme().badgeSuccessFg)
+                Text(`到期时间: ${formatTimestamp(this.storedCert.expires_at)}`)
+                  .fontSize(11)
                   .fontColor(this.theme().textSecondary)
-                  .backgroundColor(Color.Transparent)
-                  .onClick(() => {
-                    this.loginStep = 'email';
-                    this.loginPassword = '';
-                    this.authError = '';
-                  })
-              }
-              .width('100%')
-            } else if (this.loginStep === 'register') {
-              Column({ space: 14 }) {
-                Column({ space: 6 }) {
-                  Text('邮箱').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ text: this.emailInput })
-                    .enabled(false)
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textSecondary)
-                    .backgroundColor(this.theme().bgSubtle)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Column({ space: 6 }) {
-                  Text('显示名称（可选）').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '您的昵称', text: this.regDisplayName })
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.regDisplayName = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Column({ space: 6 }) {
-                  Text('密码（至少 12 个字符）').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '设置安全密码', text: this.loginPassword })
-                    .type(InputType.Password)
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.loginPassword = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.isSubmitting ? '提交中...' : '完成注册')
-                  .width('100%')
-                  .height(38)
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
-                  .backgroundColor(this.theme().accentColor)
-                  .borderRadius(4)
-                  .onClick(() => {
-                    this.handleRegister();
-                  })
-
-                Button('使用其他邮箱')
-                  .width('100%')
-                  .height(34)
-                  .fontSize(13)
-                  .fontColor(this.theme().textSecondary)
-                  .backgroundColor(Color.Transparent)
-                  .onClick(() => {
-                    this.loginStep = 'email';
-                    this.loginPassword = '';
-                    this.authError = '';
-                  })
-              }
-              .width('100%')
-            } else if (this.loginStep === 'totp') {
-              Column({ space: 14 }) {
-                Column({ space: 6 }) {
-                  Text(this.totpUseRecovery ? '恢复码' : '两步验证码')
-                    .fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.theme().textPrimary)
-                  TextInput({
-                    placeholder: this.totpUseRecovery ? '输入恢复码' : '输入 6 位验证码',
-                    text: this.totpCode
-                  })
-                    .height(38)
-                    .fontSize(14)
-                    .fontColor(this.theme().textPrimary)
-                    .backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.totpCode = v; })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.totpUseRecovery ? '恢复' : '验证')
-                  .width('100%')
-                  .height(38)
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
-                  .backgroundColor(this.theme().accentColor)
-                  .borderRadius(4)
-                  .onClick(() => {
-                    this.handleTotpVerify();
-                  })
-
-                Row({ space: 8 }) {
-                  Button(this.totpUseRecovery ? '使用验证码' : '使用恢复码')
-                    .height(32).fontSize(12).fontColor(this.theme().textSecondary).backgroundColor(Color.Transparent)
-                    .layoutWeight(1)
-                    .onClick(() => {
-                      this.totpUseRecovery = !this.totpUseRecovery;
-                      this.totpCode = '';
-                    })
-                  Button('返回')
-                    .height(32).fontSize(12).fontColor(this.theme().textSecondary).backgroundColor(Color.Transparent)
-                    .layoutWeight(1)
-                    .onClick(() => {
-                      this.loginStep = 'login';
-                      this.totpCode = '';
-                    })
-                }.width('100%')
-              }
-              .width('100%')
-            } else if (this.loginStep === 'oobe') {
-              Column({ space: 10 }) {
-                Row({ space: 8 }) {
-                  TextInput({ placeholder: '服务端初始化口令', text: this.oobePasscode })
-                    .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
-                    .onChange((v: string) => { this.oobePasscode = v; })
-                  Button('验证口令')
-                    .height(36).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor).borderRadius(4)
-                    .onClick(async () => {
-                      ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-                      const r = await ApiService.get().verifyOobe(this.oobePasscode);
-                      if (r.ok) {
-                        this.oobeVerified = true;
-                        this.authInfoMsg = '初始化口令验证通过';
+                Row({ space: 6 }) {
+                  HmosIconTextButton(
+                    $r('sys.symbol.checkmark_shield'),
+                    '使用本机安全证书一键登录',
+                    '#FFFFFF',
+                    this.theme().accentColor,
+                    Color.Transparent,
+                    () => {
+                      this.handleUseStoredCertificateSession();
+                    },
+                    34,
+                    12
+                  )
+                  HmosIconTextButton(
+                    $r('sys.symbol.arrow_clockwise'),
+                    '轮换下一代',
+                    this.theme().textPrimary,
+                    this.theme().bgCard,
+                    this.theme().borderColor,
+                    async () => {
+                      const r = await ApiService.get().rotateCertificateIfEligible();
+                      if (r.ok && r.data) {
+                        this.storedCert = r.data;
+                        this.authInfoMsg = `安全证书已成功轮换至第 ${r.data.generation} 代`;
                       } else {
-                        this.authError = r.error || '初始化口令验证失败';
+                        this.authError = r.error || '仅当有效期低于 24 小时且未超 12 代时可轮换';
                       }
-                    })
-                }.width('100%')
-
-                TextInput({ placeholder: 'PostgreSQL 连接串', text: this.oobePgUrl })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobePgUrl = v; })
-                TextInput({ placeholder: 'Redis 连接串', text: this.oobeRedisUrl })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeRedisUrl = v; })
-                TextInput({ placeholder: '系统主域名', text: this.oobeDomain })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeDomain = v; })
-                TextInput({ placeholder: '超级管理员用户名', text: this.oobeAdminUser })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeAdminUser = v; })
-                TextInput({ placeholder: '超级管理员邮箱', text: this.oobeAdminEmail })
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeAdminEmail = v; })
-                TextInput({ placeholder: '超级管理员初始密码', text: this.oobeAdminPassword })
-                  .type(InputType.Password)
-                  .height(36).fontSize(12).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.oobeAdminPassword = v; })
-
-                Row({ space: 8 }) {
-                  Button('返回')
-                    .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgSubtle)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
-                    .onClick(() => { this.loginStep = 'email'; })
-                  Button('完成初始化')
-                    .height(36).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor)
-                    .borderRadius(4).layoutWeight(2)
-                    .onClick(async () => {
-                      ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-                      const payload: Record<string, Object> = {
-                        'passcode': this.oobePasscode,
-                        'postgres_url': this.oobePgUrl,
-                        'redis_url': this.oobeRedisUrl,
-                        'domain': this.oobeDomain,
-                        'admin_username': this.oobeAdminUser,
-                        'admin_email': this.oobeAdminEmail,
-                        'admin_password': this.oobeAdminPassword
-                      };
-                      const r = await ApiService.get().configureOobe(payload);
-                      if (r.ok) {
-                        this.loginStep = 'login';
-                        this.authInfoMsg = '系统初始化成功，请登录';
-                      } else {
-                        this.authError = r.error || '初始化失败';
-                      }
-                    })
-                }.width('100%')
+                    },
+                    34,
+                    12
+                  )
+                }
+                .width('100%')
               }
               .width('100%')
+              .padding(12)
+              .backgroundColor(this.theme().badgeSuccessBg)
+              .borderRadius(8)
             }
 
-            // Login Security Certificate & Reverse QR Web Login Section
-            this.buildCertificateAndQrSection(false)
+            Button({ type: ButtonType.Normal }) {
+              Row({ space: 8 }) {
+                SymbolGlyph($r('sys.symbol.qrcode'))
+                  .fontSize(18)
+                  .fontColor(['#FFFFFF'])
+                Text(this.isSubmitting ? '正在验证登录...' : '扫码登录')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor('#FFFFFF')
+              }
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+            }
+            .width('100%')
+            .height(44)
+            .backgroundColor(this.theme().accentColor)
+            .borderRadius(6)
+            .onClick(() => {
+              this.startNativeQrScan();
+            })
+
+            Text('请先在网页端「个人资料与安全设置」签发移动端登录安全证书，然后点击上方「扫码登录」扫描二维码即可直接完成登录；已绑定安全证书时也可直接扫描网页端登录二维码确认授权。')
+              .fontSize(12)
+              .fontColor(this.theme().textSecondary)
+              .textAlign(TextAlign.Center)
+              .lineHeight(18)
 
             this.buildWebFooterDisclaimer()
           }
