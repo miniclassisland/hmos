@@ -18,12 +18,14 @@ export struct SecurityAndAdminView {
   @Prop breakpoint: string = 'sm';
   @Prop themeMode: string = 'light';
   public onTakeoverTenant: (acc: AdminAccountItem) => void = () => {};
+  public onRefreshAccounts: () => void = () => {};
 
   // Personal Security
   @State userProfile: UserInfo | null = null;
   @State secDisplayName: string = '';
   @State secEmail: string = '';
   @State secUsername: string = '';
+  @State joinInviteCode: string = '';
   @State oldPassword: string = '';
   @State newPassword: string = '';
   @State totpSecret: string = '';
@@ -56,8 +58,8 @@ export struct SecurityAndAdminView {
   @State accountSearch: string = '';
   @State newGlobalAccName: string = '';
   @State newGlobalAccSlug: string = '';
-  @State newGlobalAccOwnerId: string = '1';
-  @State selectedQuotaAccountId: number = 0;
+  @State newGlobalAccOwnerId: string = '';
+  @State selectedQuotaAccountId: string = '';
   @State qMaxClients: string = '100';
   @State qMaxGrpc: string = '100';
   @State qMaxBw: string = '1024';
@@ -140,26 +142,67 @@ export struct SecurityAndAdminView {
   @Builder
   buildSecurityView() {
     Column({ space: 16 }) {
-      // 1. 个人资料卡片
+      // 1. 个人资料卡片 (1:1 matching web/app/security/page.tsx)
       Column({ space: 12 }) {
-        Text('个人资料')
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.theme().textPrimary)
+        Row({ space: 8 }) {
+          HmosSymbolIcon($r('sys.symbol.person'), 16, this.theme().accentColor)
+          Text('个人资料')
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.theme().textPrimary)
+            .layoutWeight(1)
+          Button('保存资料修改')
+            .height(32)
+            .fontSize(12)
+            .fontColor('#FFFFFF')
+            .backgroundColor(this.theme().accentColor)
+            .borderRadius(4)
+            .onClick(async () => {
+              const r = await ApiService.get().updateProfile(this.secDisplayName, this.secEmail, this.secUsername);
+              this.notify(r.ok ? '个人资料已更新' : (r.error || '更新失败'), !r.ok);
+              if (r.ok) {
+                await this.reloadData();
+              }
+            })
+        }.width('100%')
+
+        Column({ space: 4 }) {
+          Text('用户唯一标识').fontSize(12).fontColor(this.theme().textSecondary)
+          TextInput({ text: this.userProfile?.id || '-' })
+            .height(34)
+            .fontSize(12)
+            .fontFamily('monospace')
+            .fontColor(this.theme().textSecondary)
+            .backgroundColor(this.theme().bgSubtle)
+            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .enabled(false)
+        }.width('100%').alignItems(HorizontalAlign.Start)
+
+        Column({ space: 4 }) {
+          Text('显示名称').fontSize(12).fontColor(this.theme().textSecondary)
+          TextInput({ placeholder: '显示名称', text: this.secDisplayName })
+            .height(34)
+            .fontSize(13)
+            .fontColor(this.theme().textPrimary)
+            .backgroundColor(this.theme().bgInput)
+            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .onChange((v: string) => { this.secDisplayName = v; })
+        }.width('100%').alignItems(HorizontalAlign.Start)
+
         Row({ space: 10 }) {
           Column({ space: 4 }) {
-            Text('显示名称').fontSize(12).fontColor(this.theme().textSecondary)
-            TextInput({ placeholder: '显示名称', text: this.secDisplayName })
+            Text('用户名').fontSize(12).fontColor(this.theme().textSecondary)
+            TextInput({ placeholder: '用户名', text: this.secUsername })
               .height(34)
               .fontSize(13)
               .fontColor(this.theme().textPrimary)
               .backgroundColor(this.theme().bgInput)
               .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-              .onChange((v: string) => { this.secDisplayName = v; })
+              .onChange((v: string) => { this.secUsername = v; })
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
 
           Column({ space: 4 }) {
-            Text('邮箱').fontSize(12).fontColor(this.theme().textSecondary)
+            Text('绑定邮箱').fontSize(12).fontColor(this.theme().textSecondary)
             TextInput({ placeholder: '邮箱', text: this.secEmail })
               .height(34)
               .fontSize(13)
@@ -169,17 +212,56 @@ export struct SecurityAndAdminView {
               .onChange((v: string) => { this.secEmail = v; })
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         }.width('100%')
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .padding(18)
+      .backgroundColor(this.theme().bgCard)
+      .borderRadius(8)
+      .border({ width: 1, color: this.theme().borderColor })
 
-        Button('保存个人资料')
-          .height(34)
-          .fontSize(13)
-          .fontColor('#FFFFFF')
-          .backgroundColor(this.theme().accentColor)
-          .borderRadius(4)
-          .onClick(async () => {
-            const r = await ApiService.get().updateProfile(this.secDisplayName, this.secEmail, this.secUsername);
-            this.notify(r.ok ? '个人资料已更新' : (r.error || '更新失败'), !r.ok);
-          })
+      // 1b. 使用邀请码加入集控账户卡片 (1:1 matching web/app/security/page.tsx)
+      Column({ space: 10 }) {
+        Row({ space: 8 }) {
+          HmosSymbolIcon($r('sys.symbol.person_badge_plus'), 16, this.theme().accentColor)
+          Text('使用邀请码加入集控账户')
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.theme().textPrimary)
+            .layoutWeight(1)
+        }.width('100%')
+
+        Text('如果您收到了其他组织或学校的集控账户邀请码，可在此输入邀请码加入该账户中心。')
+          .fontSize(12)
+          .fontColor(this.theme().textSecondary)
+
+        Row({ space: 8 }) {
+          TextInput({ placeholder: '请输入邀请码...', text: this.joinInviteCode })
+            .height(34)
+            .fontSize(13)
+            .fontColor(this.theme().textPrimary)
+            .backgroundColor(this.theme().bgInput)
+            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .layoutWeight(1)
+            .onChange((v: string) => { this.joinInviteCode = v; })
+          Button('加入账户')
+            .height(34)
+            .fontSize(12)
+            .fontColor('#FFFFFF')
+            .backgroundColor(this.theme().accentColor)
+            .borderRadius(4)
+            .onClick(async () => {
+              if (!this.joinInviteCode.trim()) { return; }
+              const r = await ApiService.get().acceptInvitation(this.joinInviteCode.trim());
+              if (r.ok) {
+                this.joinInviteCode = '';
+                this.notify('已成功加入集控账户中心', false);
+                this.onRefreshAccounts();
+              } else {
+                this.notify(r.error || '加入账户失败，请检查邀请码是否有效', true);
+              }
+            })
+        }.width('100%')
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -844,7 +926,7 @@ export struct SecurityAndAdminView {
           )
         }
 
-        if (this.selectedQuotaAccountId > 0) {
+        if (this.selectedQuotaAccountId.length > 0) {
           Column({ space: 8 }) {
             Text(`配置账户 #${this.selectedQuotaAccountId} 配额上限`)
               .fontSize(13).fontWeight(FontWeight.Bold).fontColor(this.theme().accentColor)
@@ -877,7 +959,7 @@ export struct SecurityAndAdminView {
                   const r = await ApiService.get().updateGlobalAccountQuotas(this.selectedQuotaAccountId, qMap);
                   if (r.ok) {
                     this.notify('配额已保存', false);
-                    this.selectedQuotaAccountId = 0;
+                    this.selectedQuotaAccountId = '';
                   }
                 })
             }

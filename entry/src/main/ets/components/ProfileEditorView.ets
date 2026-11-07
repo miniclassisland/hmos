@@ -16,7 +16,7 @@ import { ProfileSettingsAndComponentsEditors } from './ProfileSettingsAndCompone
 
 @Component
 export struct ProfileEditorView {
-  @Prop accountId: number = 0;
+  @Prop accountId: string = '';
   @Prop resourceType: string = 'Subjects';
   @Prop breakpoint: string = 'sm';
   @Prop themeMode: string = 'light';
@@ -44,7 +44,7 @@ export struct ProfileEditorView {
   @State refTimeLayoutsMap: TimeLayoutGroup[] = [];
 
   private lastLoadedType: string = '';
-  private lastLoadedAccount: number = -1;
+  private lastLoadedAccount: string = '';
 
   aboutToAppear(): void {
     this.reloadIfNeeded();
@@ -56,7 +56,7 @@ export struct ProfileEditorView {
   }
 
   public async reloadIfNeeded(): Promise<void> {
-    if (this.accountId <= 0) {
+    if (!this.accountId || this.accountId.length === 0) {
       return;
     }
     this.lastLoadedType = this.resourceType;

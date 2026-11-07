@@ -5,7 +5,8 @@ import {
   InvitationItem,
   PairingRequestItem,
   PreRegItem,
-  AdminAccountItem
+  AdminAccountItem,
+  getQuotaLabel
 } from '../model/Types';
 import { WebThemePalette, getWebPalette } from '../model/Theme';
 import { ApiService } from '../service/ApiService';
@@ -14,15 +15,17 @@ import { SecurityAndAdminView } from './SecurityAndAdminView';
 
 @Component
 export struct AdmissionAndGovernanceView {
-  @Prop accountId: number = 0;
+  @Prop accountId: string = '';
   @Prop subMode: string = 'pairing';
   // 'pairing' | 'prereg' | 'account' | 'access' | 'invitations' | 'security' | 'admin_users' | 'admin_pending' | 'admin_accounts' | 'admin_settings'
   @Prop breakpoint: string = 'sm';
   @Prop themeMode: string = 'light';
   public onTakeoverTenant: (acc: AdminAccountItem) => void = () => {};
+  public onRefreshAccounts: () => void = () => {};
 
   // Admission state
   @State accountInfo: AccountInfo | null = null;
+  @State pairingModeVal: string = 'open';
   @State pairingList: PairingRequestItem[] = [];
   @State pairingFilter: string = 'pending';
   @State preRegList: PreRegItem[] = [];
@@ -45,7 +48,7 @@ export struct AdmissionAndGovernanceView {
 
   @State statusMsg: string = '';
   @State isError: boolean = false;
-  private lastAccount: number = -1;
+  private lastAccount: string = '';
   private lastMode: string = '';
 
   aboutToAppear(): void {
@@ -62,21 +65,27 @@ export struct AdmissionAndGovernanceView {
     this.lastMode = this.subMode;
     const api = ApiService.get();
 
-    if (this.subMode === 'pairing' && this.accountId > 0) {
-      const infoRes = await api.getAccountInfo(this.accountId);
-      if (infoRes.ok && infoRes.data) {
-        this.accountInfo = infoRes.data;
+    if (this.subMode === 'pairing' && this.accountId.length > 0) {
+      const mRes = await api.getPairingStatus(this.accountId);
+      if (mRes.ok && mRes.data) {
+        this.pairingModeVal = mRes.data;
+      } else {
+        const infoRes = await api.getAccountInfo(this.accountId);
+        if (infoRes.ok && infoRes.data) {
+          this.accountInfo = infoRes.data;
+          this.pairingModeVal = infoRes.data.registration_mode || 'open';
+        }
       }
       const pRes = await api.listPairingRequests(this.accountId, this.pairingFilter);
       if (pRes.ok && pRes.data) {
         this.pairingList = pRes.data;
       }
-    } else if (this.subMode === 'prereg' && this.accountId > 0) {
+    } else if (this.subMode === 'prereg' && this.accountId.length > 0) {
       const r = await api.listPreRegItems(this.accountId);
       if (r.ok && r.data) {
         this.preRegList = r.data;
       }
-    } else if (this.subMode === 'account' && this.accountId > 0) {
+    } else if (this.subMode === 'account' && this.accountId.length > 0) {
       const infoRes = await api.getAccountInfo(this.accountId);
       if (infoRes.ok && infoRes.data) {
         this.accountInfo = infoRes.data;
@@ -87,12 +96,12 @@ export struct AdmissionAndGovernanceView {
       if (qRes.ok && qRes.data) {
         this.quotas = qRes.data;
       }
-    } else if (this.subMode === 'access' && this.accountId > 0) {
+    } else if (this.subMode === 'access' && this.accountId.length > 0) {
       const mRes = await api.listMembers(this.accountId);
       if (mRes.ok && mRes.data) {
         this.members = mRes.data;
       }
-    } else if (this.subMode === 'invitations' && this.accountId > 0) {
+    } else if (this.subMode === 'invitations' && this.accountId.length > 0) {
       const iRes = await api.listInvitations(this.accountId);
       if (iRes.ok && iRes.data) {
         this.invitations = iRes.data;
@@ -152,18 +161,13 @@ export struct AdmissionAndGovernanceView {
               .height(32)
               .fontSize(12)
               .margin({ right: 8, bottom: 6 })
-              .fontColor(this.accountInfo?.registration_mode === pair[0] ? '#FFFFFF' : this.theme().textPrimary)
-              .backgroundColor(this.accountInfo?.registration_mode === pair[0] ? this.theme().accentColor : this.theme().bgSubtle)
+              .fontColor(this.pairingModeVal === pair[0] ? '#FFFFFF' : this.theme().textPrimary)
+              .backgroundColor(this.pairingModeVal === pair[0] ? this.theme().accentColor : this.theme().bgSubtle)
               .border({ width: 1, color: this.theme().borderColor, radius: 4 })
               .onClick(async () => {
-                if (!this.accountInfo) { return; }
-                const r = await ApiService.get().updateAccountInfo(
-                  this.accountId,
-                  this.accountInfo.name,
-                  this.accountInfo.slug,
-                  pair[0]
-                );
+                const r = await ApiService.get().setPairingMode(this.accountId, pair[0]);
                 if (r.ok) {
+                  this.pairingModeVal = pair[0];
                   this.notify(`设备接入策略已切换为：${pair[1]}`, false);
                   await this.reloadData();
                 }
@@ -569,8 +573,8 @@ export struct AdmissionAndGovernanceView {
         }
         ForEach(this.quotas, (q: QuotaItem) => {
           Row() {
-            Text(q.quota_type).fontSize(13).fontColor(this.theme().textPrimary).layoutWeight(1)
-            Text(`${q.current_value} / ${q.limit_value}`)
+            Text(getQuotaLabel(q.quota_key || q.quota_type || '')).fontSize(13).fontColor(this.theme().textPrimary).layoutWeight(1)
+            Text(`${q.current_value} / ${q.max_value ?? q.limit_value ?? 0}`)
               .fontSize(13)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.theme().accentColor)
@@ -578,7 +582,7 @@ export struct AdmissionAndGovernanceView {
           .width('100%')
           .padding({ top: 8, bottom: 8 })
           .border({ width: { bottom: 1 }, color: this.theme().borderSubtle })
-        }, (q: QuotaItem) => `${q.id}_${q.quota_type}`)
+        }, (q: QuotaItem) => `${q.id}_${q.quota_key}`)
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -794,6 +798,9 @@ export struct AdmissionAndGovernanceView {
           themeMode: this.themeMode,
           onTakeoverTenant: (acc: AdminAccountItem) => {
             this.onTakeoverTenant(acc);
+          },
+          onRefreshAccounts: () => {
+            this.onRefreshAccounts();
           }
         })
       }

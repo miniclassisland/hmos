@@ -7,7 +7,7 @@ import { HmosIconTextButton } from './HmosIcons';
 export struct DashboardView {
   @Prop isSuperAdminMode: boolean = false;
   @Prop isSuperAdminTakeover: boolean = false;
-  @Prop currentAccountId: number = 0;
+  @Prop currentAccountId: string = '';
   @Prop currentAccountName: string = '';
   @Prop currentAccountSlug: string = '';
   @Prop breakpoint: string = 'sm';

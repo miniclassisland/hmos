@@ -13,7 +13,7 @@ import { HmosIconTextButton } from './HmosIcons';
 
 @Component
 export struct NotificationsAndAuditView {
-  @Prop accountId: number = 0;
+  @Prop accountId: string = '';
   @Prop subMode: string = 'notifications'; // 'notifications' | 'audit'
   @Prop fixedClientUid: string = '';
   @Prop clients: ClientRecord[] = [];
@@ -42,7 +42,7 @@ export struct NotificationsAndAuditView {
     RepeatCounts: 1
   };
 
-  private lastAccount: number = -1;
+  private lastAccount: string = '';
   private lastMode: string = '';
 
   aboutToAppear(): void {
@@ -56,7 +56,7 @@ export struct NotificationsAndAuditView {
   public async reloadIfNeeded(): Promise<void> {
     this.lastAccount = this.accountId;
     this.lastMode = this.subMode;
-    if (this.subMode === 'audit' && this.accountId > 0) {
+    if (this.subMode === 'audit' && this.accountId.length > 0) {
       await this.loadAuditLogs();
     }
   }

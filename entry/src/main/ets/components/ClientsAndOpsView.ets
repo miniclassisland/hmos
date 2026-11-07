@@ -11,7 +11,7 @@ import { NotificationsAndAuditView } from './NotificationsAndAuditView';
 
 @Component
 export struct ClientsAndOpsView {
-  @Prop accountId: number = 0;
+  @Prop accountId: string = '';
   @Prop subMode: string = 'clients'; // 'clients' | 'notifications' | 'audit'
   @Prop breakpoint: string = 'sm';
   @Prop themeMode: string = 'light';
@@ -50,7 +50,7 @@ export struct ClientsAndOpsView {
   @State statusMsg: string = '';
   @State isError: boolean = false;
 
-  private lastLoadedAccount: number = -1;
+  private lastLoadedAccount: string = '';
   private lastSubMode: string = '';
 
   aboutToAppear(): void {
@@ -63,7 +63,7 @@ export struct ClientsAndOpsView {
   }
 
   public async reloadAll(): Promise<void> {
-    if (this.accountId <= 0) {
+    if (!this.accountId || this.accountId.length === 0) {
       return;
     }
     this.lastLoadedAccount = this.accountId;
@@ -104,14 +104,14 @@ export struct ClientsAndOpsView {
     this.editClientId = c.client_id || '';
     const pRes = await ApiService.get().getClientProfile(this.accountId, c.uid);
     if (pRes.ok && pRes.data) {
-      const prof = (pRes.data['profile'] || {}) as Record<string, Object>;
-      this.bindCp = String(prof['cp_resource_name'] || '');
-      this.bindTl = String(prof['tl_resource_name'] || '');
-      this.bindSub = String(prof['sub_resource_name'] || '');
-      this.bindPol = String(prof['pol_resource_name'] || '');
-      this.bindDs = String(prof['ds_resource_name'] || '');
-      this.bindCom = String(prof['com_resource_name'] || '');
-      this.bindCred = String(prof['cred_resource_name'] || '');
+      const prof = (pRes.data['profile'] || pRes.data) as Record<string, Object>;
+      this.bindCp = String(prof['ClassPlan'] || prof['cp_resource_name'] || '');
+      this.bindTl = String(prof['TimeLayout'] || prof['tl_resource_name'] || '');
+      this.bindSub = String(prof['Subjects'] || prof['sub_resource_name'] || '');
+      this.bindPol = String(prof['Policy'] || prof['pol_resource_name'] || '');
+      this.bindDs = String(prof['DefaultSettings'] || prof['ds_resource_name'] || '');
+      this.bindCom = String(prof['Components'] || prof['com_resource_name'] || '');
+      this.bindCred = String(prof['Credentials'] || prof['cred_resource_name'] || '');
     }
     const snapRes = await ApiService.get().listConfigSnapshots(this.accountId, c.uid);
     if (snapRes.ok && snapRes.data) {
@@ -619,8 +619,15 @@ export struct ClientsAndOpsView {
                   .fontColor(this.theme().accentColor)
                   .backgroundColor(this.theme().bgAccentSubtle)
                   .borderRadius(4)
-                  .onClick(() => {
-                    this.selectedSnapshotJson = snap.payload;
+                  .onClick(async () => {
+                    if (snap.payload && snap.payload.trim().length > 0) {
+                      this.selectedSnapshotJson = snap.payload;
+                    } else {
+                      const dRes = await ApiService.get().getConfigSnapshotDetail(this.accountId, snap.request_guid || snap.id);
+                      if (dRes.ok && dRes.data) {
+                        this.selectedSnapshotJson = dRes.data;
+                      }
+                    }
                   })
               }
               .width('100%')

@@ -10,7 +10,7 @@ import { HmosIconButton, HmosIconTextButton } from './HmosIcons';
 
 @Component
 export struct ProfileSettingsAndComponentsEditors {
-  @Prop accountId: number = 0;
+  @Prop accountId: string = '';
   @Prop resourceType: string = 'Policy'; // 'Policy' | 'DefaultSettings' | 'Components' | 'Credentials'
   @Prop rawJsonText: string = '{}';
   @Prop themeMode: string = 'light';

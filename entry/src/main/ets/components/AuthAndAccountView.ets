@@ -2,6 +2,13 @@ import {
   UserInfo,
   AccountSummary,
   StoredLoginCert,
+  TicketItem,
+  TicketMessageItem,
+  getAccountRoleLabel,
+  getSystemRoleLabel,
+  getTicketStatusLabel,
+  getTicketPriorityLabel,
+  getTicketCategoryLabel,
   formatTimestamp
 } from '../model/Types';
 import { WebThemePalette, getWebPalette } from '../model/Theme';
@@ -11,7 +18,7 @@ import { scanBarcode, scanCore } from '@kit.ScanKit';
 
 @Component
 export struct AuthAndAccountView {
-  @Prop mode: string = 'login'; // 'login' | 'accounts'
+  @Prop mode: string = 'login'; // 'login' | 'user_home' | 'tickets'
   @Prop breakpoint: string = 'sm';
   @Prop themeMode: string = 'light';
   @Prop safeTopVp: number = 0;
@@ -24,6 +31,8 @@ export struct AuthAndAccountView {
   public onThemeChange: (nextMode: string) => void = () => {};
   public onAuthCompleted: (token: string, user: UserInfo) => void = () => {};
   public onSelectAccount: (acc: AccountSummary) => void = () => {};
+  public onNavigateAccountSection: (acc: AccountSummary, sec: string) => void = () => {};
+  public onNavigateSection: (sec: string) => void = () => {};
   public onEnterSuperAdmin: () => void = () => {};
   public onRefreshAccounts: () => void = () => {};
   public onLogout: () => void = () => {};
@@ -31,16 +40,7 @@ export struct AuthAndAccountView {
   @State managementEndpoint: string = 'https://api.miniclassisland.com';
   @State adminEndpoint: string = 'https://admin.miniclassisland.com/api';
   @State showEndpointConfig: boolean = false;
-  @State loginStep: string = 'email'; // 'email' | 'login' | 'register' | 'totp' | 'oobe'
-  @State useAdminAuthEndpoint: boolean = false;
 
-  @State emailInput: string = '';
-  @State loginUsername: string = '';
-  @State loginPassword: string = '';
-  @State regDisplayName: string = '';
-  @State totpSession: string = '';
-  @State totpCode: string = '';
-  @State totpUseRecovery: boolean = false;
   @State authError: string = '';
   @State authInfoMsg: string = '';
   @State isSubmitting: boolean = false;
@@ -50,133 +50,79 @@ export struct AuthAndAccountView {
   @State qrLoginCodeInput: string = '';
   @State storedCert: StoredLoginCert | null = null;
 
-  // OOBE Wizard State
-  @State oobePasscode: string = '';
-  @State oobeVerified: boolean = false;
-  @State oobePgUrl: string = 'postgres://postgres:postgres@localhost:5432/miniclassisland?sslmode=disable';
-  @State oobeRedisUrl: string = 'redis://localhost:6379/0';
-  @State oobeDomain: string = 'api.miniclassisland.com';
-  @State oobeAdminUser: string = 'admin';
-  @State oobeAdminEmail: string = 'admin@example.com';
-  @State oobeAdminPassword: string = '';
-
-  // Account Selection Dialogs
+  // User Center Home State (matching web/app/page.tsx)
   @State showCreateAccountDialog: boolean = false;
-  @State showJoinInviteDialog: boolean = false;
   @State newTenantName: string = '';
   @State newTenantSlug: string = '';
-  @State inviteCodeInput: string = '';
+  @State accountSearchQuery: string = '';
+
+  // Support Tickets State (matching web/app/tickets/page.tsx)
+  @State tickets: TicketItem[] = [];
+  @State ticketStatusFilter: string = 'all';
+  @State showCreateTicketForm: boolean = false;
+  @State newTicketSubject: string = '';
+  @State newTicketCategory: string = 'general';
+  @State newTicketPriority: string = 'normal';
+  @State newTicketContent: string = '';
+  @State activeTicketDetail: TicketItem | null = null;
+  @State ticketReplyText: string = '';
+
+  private lastLoadedMode: string = '';
 
   aboutToAppear(): void {
     this.managementEndpoint = ApiService.get().managementUrl;
     this.adminEndpoint = ApiService.get().adminUrl;
     this.storedCert = ApiService.get().storedCertificate;
+    this.reloadForMode();
+  }
+
+  private reloadForMode(): void {
+    this.lastLoadedMode = this.mode;
+    if (this.mode === 'tickets') {
+      this.loadMyTickets();
+    }
+  }
+
+  private async loadMyTickets(): Promise<void> {
+    const r = await ApiService.get().listMyTickets(this.ticketStatusFilter);
+    if (r.ok && r.data) {
+      this.tickets = r.data;
+    }
+  }
+
+  private async openTicketDetail(t: TicketItem): Promise<void> {
+    const r = await ApiService.get().getTicketDetail(t.id);
+    if (r.ok && r.data) {
+      this.activeTicketDetail = r.data;
+    } else {
+      this.activeTicketDetail = t;
+    }
   }
 
   private theme(): WebThemePalette {
     return getWebPalette(this.themeMode);
   }
 
-  private async handleEmailCheck(): Promise<void> {
-    const trimmed = this.emailInput.trim();
-    if (trimmed.length === 0) {
-      return;
+  private getFilteredAccounts(): AccountSummary[] {
+    const q = this.accountSearchQuery.trim().toLowerCase();
+    if (!q) {
+      return this.accounts;
     }
-    this.authError = '';
-    this.authInfoMsg = '';
-    this.isSubmitting = true;
-    ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-    const res = await ApiService.get().checkMailAvailability(trimmed);
-    this.isSubmitting = false;
-
-    if (res.isOobe) {
-      this.loginStep = 'oobe';
-      return;
+    const out: AccountSummary[] = [];
+    for (let i = 0; i < this.accounts.length; i++) {
+      const a = this.accounts[i];
+      const hay = `${a.name} ${a.slug}`.toLowerCase();
+      if (hay.indexOf(q) >= 0) {
+        out.push(a);
+      }
     }
-    if (!res.ok) {
-      this.loginUsername = trimmed;
-      this.loginStep = 'login';
-      return;
-    }
-    if (res.data === true) {
-      this.loginStep = 'register';
-    } else {
-      this.loginUsername = trimmed;
-      this.loginStep = 'login';
-    }
-  }
-
-  private async handleLogin(): Promise<void> {
-    this.authError = '';
-    this.authInfoMsg = '';
-    this.isSubmitting = true;
-    ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-    const identifier = this.loginUsername.trim().length > 0 ? this.loginUsername.trim() : this.emailInput.trim();
-    const res = await ApiService.get().login(identifier, this.loginPassword, this.useAdminAuthEndpoint);
-    this.isSubmitting = false;
-
-    if (res.isOobe) {
-      this.loginStep = 'oobe';
-      return;
-    }
-    if (!res.ok || !res.data) {
-      this.authError = res.error || '登录失败';
-      return;
-    }
-    if (res.data.totp_required) {
-      this.totpSession = res.data.totp_session;
-      this.loginStep = 'totp';
-      return;
-    }
-    this.onAuthCompleted(res.data.token, res.data.user);
-  }
-
-  private async handleRegister(): Promise<void> {
-    if (this.loginPassword.length < 12) {
-      this.authError = '密码长度至少为 12 个字符';
-      return;
-    }
-    this.authError = '';
-    this.isSubmitting = true;
-    ApiService.get().setEndpoints(this.managementEndpoint, this.adminEndpoint);
-    const email = this.emailInput.trim();
-    const autoUsername = email.indexOf('@') > 0 ? email.split('@')[0] : email;
-    const r = await ApiService.get().registerUser(
-      autoUsername,
-      email,
-      this.loginPassword,
-      this.regDisplayName.trim()
-    );
-    this.isSubmitting = false;
-    if (r.ok) {
-      this.loginUsername = email;
-      this.loginStep = 'login';
-      this.authInfoMsg = '注册成功，请登录或等待超级管理员审核通过';
-    } else {
-      this.authError = r.error || '注册失败';
-    }
-  }
-
-  private async handleTotpVerify(): Promise<void> {
-    this.authError = '';
-    this.isSubmitting = true;
-    const api = ApiService.get();
-    const res = this.totpUseRecovery
-      ? await api.recoverTotp(this.totpSession, this.totpCode, this.useAdminAuthEndpoint)
-      : await api.verifyTotp(this.totpSession, this.totpCode, this.useAdminAuthEndpoint);
-    this.isSubmitting = false;
-
-    if (!res.ok || !res.data) {
-      this.authError = res.error || '验证失败';
-      return;
-    }
-    this.onAuthCompleted(res.data.token, res.data.user);
+    return out;
   }
 
   private async handleRedeemAndLogin(): Promise<void> {
     const raw = this.certExchangeInput.trim();
     if (!raw) {
-      this.authError = '请输入或粘贴安全证书兑换码 / DeepLink 链接';
+      this.authError = '请输入或粘贴安全证书兑换码';
       return;
     }
     this.authError = '';
@@ -321,177 +267,6 @@ export struct AuthAndAccountView {
     }
     .width('100%')
     .margin({ top: 20 })
-  }
-
-  @Builder
-  buildCertificateAndQrSection(showQrAuthorize: boolean) {
-    Column({ space: 10 }) {
-      Divider().color(this.theme().borderColor).margin({ top: 4, bottom: 4 })
-
-      // Stored Login Security Certificate Box
-      Column({ space: 8 }) {
-        Row({ space: 6 }) {
-          HmosSymbolIcon($r('sys.symbol.checkmark_shield'), 15, this.theme().accentColor)
-          Text('登录安全证书')
-            .fontSize(12)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.theme().textPrimary)
-            .layoutWeight(1)
-        }
-        .width('100%')
-
-        if (this.storedCert !== null) {
-          Column({ space: 4 }) {
-            Text(`已存证书 ID: ${this.storedCert.cert_id} · 代数: ${this.storedCert.generation}/${this.storedCert.max_generation}`)
-              .fontSize(11)
-              .fontColor(this.theme().badgeSuccessFg)
-            Text(`到期时间: ${formatTimestamp(this.storedCert.expires_at)}`)
-              .fontSize(11)
-              .fontColor(this.theme().textSecondary)
-            Row({ space: 6 }) {
-              HmosIconTextButton(
-                $r('sys.symbol.checkmark_shield'),
-                '用安全证书直接登录',
-                '#FFFFFF',
-                this.theme().accentColor,
-                Color.Transparent,
-                () => {
-                  this.handleUseStoredCertificateSession();
-                },
-                32,
-                12
-              )
-              HmosIconTextButton(
-                $r('sys.symbol.arrow_clockwise'),
-                '轮换代际',
-                this.theme().textPrimary,
-                this.theme().bgCard,
-                this.theme().borderColor,
-                async () => {
-                  const r = await ApiService.get().rotateCertificateIfEligible();
-                  if (r.ok && r.data) {
-                    this.storedCert = r.data;
-                    this.authInfoMsg = `安全证书已成功轮换至第 ${r.data.generation} 代`;
-                  } else {
-                    this.authError = r.error || '仅当有效期低于 24 小时且未超 12 代时可轮换';
-                  }
-                },
-                32,
-                11
-              )
-              HmosIconButton(
-                $r('sys.symbol.trash'),
-                this.theme().dangerColor,
-                this.theme().bgCard,
-                this.theme().borderColor,
-                () => {
-                  ApiService.get().storedCertificate = null;
-                  AppStorage.setOrCreate<string>('storedCertificateJson', '');
-                  this.storedCert = null;
-                },
-                32,
-                14
-              )
-            }
-            .width('100%')
-          }
-          .width('100%')
-          .padding(10)
-          .backgroundColor(this.theme().badgeSuccessBg)
-          .borderRadius(6)
-        }
-
-        Row({ space: 6 }) {
-          TextInput({
-            placeholder: '粘贴安全证书兑换链接或兑换码',
-            text: this.certExchangeInput
-          })
-            .height(34)
-            .fontSize(12)
-            .fontColor(this.theme().textPrimary)
-            .backgroundColor(this.theme().bgInput)
-            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-            .layoutWeight(1)
-            .onChange((v: string) => { this.certExchangeInput = v; })
-
-          HmosIconTextButton(
-            $r('sys.symbol.qrcode'),
-            '扫码或兑换',
-            '#FFFFFF',
-            this.theme().accentColor,
-            Color.Transparent,
-            () => {
-              if (this.certExchangeInput.trim().length > 0) {
-                this.handleRedeemAndLogin();
-              } else {
-                this.startNativeQrScan();
-              }
-            },
-            34,
-            12
-          )
-        }
-        .width('100%')
-      }
-      .width('100%')
-      .padding(12)
-      .backgroundColor(this.theme().bgSubtle)
-      .borderRadius(8)
-      .border({ width: 1, color: this.theme().borderColor })
-
-      // Reverse QR Code Web Login Box
-      if (showQrAuthorize || this.storedCert !== null) {
-        Column({ space: 8 }) {
-          Row({ space: 6 }) {
-            HmosSymbolIcon($r('sys.symbol.qrcode'), 15, this.theme().accentColor)
-            Text('扫码授权登录网页端')
-              .fontSize(12)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.theme().textPrimary)
-              .layoutWeight(1)
-          }
-          .width('100%')
-
-          Row({ space: 6 }) {
-            TextInput({
-              placeholder: '粘贴网页登录二维码链接或直接点击右侧扫码',
-              text: this.qrLoginCodeInput
-            })
-              .height(34)
-              .fontSize(12)
-              .fontColor(this.theme().textPrimary)
-              .backgroundColor(this.theme().bgInput)
-              .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-              .layoutWeight(1)
-              .onChange((v: string) => { this.qrLoginCodeInput = v; })
-
-            HmosIconTextButton(
-              $r('sys.symbol.qrcode'),
-              '扫码授权网页登录',
-              '#FFFFFF',
-              this.theme().accentColor,
-              Color.Transparent,
-              () => {
-                if (this.qrLoginCodeInput.trim().length > 0) {
-                  this.handleAuthorizeQrWebLogin();
-                } else {
-                  this.startNativeQrScan();
-                }
-              },
-              34,
-              12
-            )
-          }
-          .width('100%')
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor(this.theme().bgSubtle)
-        .borderRadius(8)
-        .border({ width: 1, color: this.theme().borderColor })
-      }
-    }
-    .width('100%')
   }
 
   @Builder
@@ -707,317 +482,580 @@ export struct AuthAndAccountView {
     .backgroundColor(this.theme().loginBg)
   }
 
+  // ==================== USER CENTER HOME (1:1 with web/app/page.tsx) ====================
   @Builder
-  buildAccountSelectionScreen() {
-    Stack({ alignContent: Alignment.TopEnd }) {
-      Scroll() {
-        Column() {
-          Column({ space: 14 }) {
-            Column({ space: 6 }) {
-              Image($r('app.media.app_icon'))
-                .width(48)
-                .height(48)
-                .borderRadius(10)
-                .margin({ bottom: 4 })
-              Text('选择 MINI ClassIsland 账户')
-                .fontSize(20)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.theme().textPrimary)
-              Text('选择一个账户以进入集控管理面板')
-                .fontSize(13)
-                .fontColor(this.theme().textSecondary)
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Center)
-            .margin({ bottom: 8 })
+  buildUserCenterHomeView() {
+    Column({ space: 18 }) {
+      // Header Row
+      Row({ space: 12 }) {
+        Column({ space: 4 }) {
+          Text(`欢迎回来，${this.currentUser?.display_name || this.currentUser?.username || '用户'}`)
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.theme().textPrimary)
+          Text('在此选择要管理的集控账户中心，或前往个人安全中心')
+            .fontSize(13)
+            .fontColor(this.theme().textSecondary)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
 
-            if (this.authError.length > 0) {
-              Row() {
-                Text(this.authError).fontSize(13).fontColor(this.theme().badgeDangerFg)
-              }
-              .width('100%').padding(10).backgroundColor(this.theme().badgeDangerBg).borderRadius(4)
-            }
-            if (this.authInfoMsg.length > 0) {
-              Row() {
-                Text(this.authInfoMsg).fontSize(13).fontColor(this.theme().badgeSuccessFg)
-              }
-              .width('100%').padding(10).backgroundColor(this.theme().badgeSuccessBg).borderRadius(4)
-            }
+        if (this.currentUser?.can_create_account !== false) {
+          HmosIconTextButton(
+            $r('sys.symbol.plus'),
+            '创建新账户',
+            '#FFFFFF',
+            this.theme().accentColor,
+            Color.Transparent,
+            () => {
+              this.showCreateAccountDialog = !this.showCreateAccountDialog;
+            },
+            36,
+            13
+          )
+        }
+      }
+      .width('100%')
 
-            if (this.accounts.length === 0) {
-              Column({ space: 6 }) {
-                Text('您还没有加入任何 MINI ClassIsland 账户')
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor(this.theme().textSecondary)
-                Text('请创建一个新账户或使用邀请码加入已有账户')
-                  .fontSize(12)
-                  .fontColor(this.theme().textTertiary)
-              }
-              .width('100%')
-              .padding(24)
-              .alignItems(HorizontalAlign.Center)
-            } else {
+      if (this.authError.length > 0) {
+        Row() {
+          Text(this.authError).fontSize(13).fontColor(this.theme().badgeDangerFg)
+        }
+        .width('100%').padding(10).backgroundColor(this.theme().badgeDangerBg).borderRadius(6)
+      }
+      if (this.authInfoMsg.length > 0) {
+        Row() {
+          Text(this.authInfoMsg).fontSize(13).fontColor(this.theme().badgeSuccessFg)
+        }
+        .width('100%').padding(10).backgroundColor(this.theme().badgeSuccessBg).borderRadius(6)
+      }
+
+      if (this.showCreateAccountDialog) {
+        Column({ space: 12 }) {
+          Text('创建新的 MINI ClassIsland 集控账户中心')
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.theme().textPrimary)
+          Row({ space: 10 }) {
+            Column({ space: 4 }) {
+              Text('账户名称（例如：XX中学集控中心）').fontSize(12).fontColor(this.theme().textSecondary)
+              TextInput({ placeholder: '输入组织或学校名称', text: this.newTenantName })
+                .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
+                .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+                .onChange((v: string) => { this.newTenantName = v; })
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+
+            Column({ space: 4 }) {
+              Text('账户唯一标识（可选，留空自动生成）').fontSize(12).fontColor(this.theme().textSecondary)
+              TextInput({ placeholder: '如 no1-high-school', text: this.newTenantSlug })
+                .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
+                .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+                .onChange((v: string) => { this.newTenantSlug = v; })
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          }.width('100%')
+
+          Row({ space: 8 }) {
+            Button('立即创建')
+              .height(34).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor).borderRadius(4)
+              .onClick(async () => {
+                if (!this.newTenantName.trim()) { return; }
+                const r = await ApiService.get().createTenantAccount(this.newTenantName.trim(), this.newTenantSlug.trim());
+                if (r.ok && r.data) {
+                  this.newTenantName = '';
+                  this.newTenantSlug = '';
+                  this.showCreateAccountDialog = false;
+                  this.onRefreshAccounts();
+                  const createdSummary: AccountSummary = {
+                    id: r.data.id,
+                    name: r.data.name,
+                    slug: r.data.slug,
+                    api_key: r.data.api_key,
+                    is_active: r.data.is_active,
+                    role: 'owner'
+                  };
+                  this.onSelectAccount(createdSummary);
+                } else {
+                  this.authError = r.error || '创建账户失败';
+                }
+              })
+            Button('取消')
+              .height(34).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgSubtle)
+              .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+              .onClick(() => { this.showCreateAccountDialog = false; })
+          }
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        .padding(18)
+        .backgroundColor(this.theme().bgCard)
+        .borderRadius(8)
+        .border({ width: 1, color: this.theme().accentColor })
+      }
+
+      // 3 Summary Stat Cards (matching web/app/page.tsx)
+      if (this.breakpoint !== 'sm') {
+        Row({ space: 14 }) {
+          Column({ space: 6 }) {
+            Text(`${this.accounts.length}`)
+              .fontSize(26).fontWeight(FontWeight.Bold).fontColor(this.theme().accentColor)
+            Text('可访问账户中心')
+              .fontSize(13).fontColor(this.theme().textSecondary)
+          }
+          .alignItems(HorizontalAlign.Start).padding(18).backgroundColor(this.theme().bgCard)
+          .borderRadius(8).border({ width: 1, color: this.theme().borderColor }).layoutWeight(1)
+
+          Column({ space: 6 }) {
+            Text(this.currentUser?.username || '-')
+              .fontSize(16).fontWeight(FontWeight.Bold).fontColor(this.theme().textPrimary)
+            Text(`当前登录账号 · ${getSystemRoleLabel(this.currentUser?.role_code || this.currentUser?.role || 'user')}`)
+              .fontSize(12).fontColor(this.theme().textSecondary)
+          }
+          .alignItems(HorizontalAlign.Start).padding(18).backgroundColor(this.theme().bgCard)
+          .borderRadius(8).border({ width: 1, color: this.theme().borderColor }).layoutWeight(1)
+
+          Column({ space: 6 }) {
+            Text(this.currentUser?.totp_enabled ? '已启用' : '未启用')
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.currentUser?.totp_enabled ? this.theme().badgeSuccessFg : this.theme().badgeWarningFg)
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              .backgroundColor(this.currentUser?.totp_enabled ? this.theme().badgeSuccessBg : this.theme().badgeWarningBg)
+              .borderRadius(99)
+            Text('两步验证 · 点击前往安全设置 →')
+              .fontSize(12).fontColor(this.theme().accentColor)
+          }
+          .alignItems(HorizontalAlign.Start).padding(18).backgroundColor(this.theme().bgCard)
+          .borderRadius(8).border({ width: 1, color: this.theme().borderColor }).layoutWeight(1)
+          .onClick(() => {
+            this.onNavigateSection('security');
+          })
+        }
+        .width('100%')
+      } else {
+        Column({ space: 10 }) {
+          Row({ space: 10 }) {
+            Column({ space: 4 }) {
+              Text(`${this.accounts.length}`)
+                .fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.theme().accentColor)
+              Text('可访问账户中心')
+                .fontSize(12).fontColor(this.theme().textSecondary)
+            }
+            .alignItems(HorizontalAlign.Start).padding(14).backgroundColor(this.theme().bgCard)
+            .borderRadius(8).border({ width: 1, color: this.theme().borderColor }).layoutWeight(1)
+
+            Column({ space: 4 }) {
+              Text(this.currentUser?.totp_enabled ? '已启用' : '未启用')
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.currentUser?.totp_enabled ? this.theme().badgeSuccessFg : this.theme().badgeWarningFg)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .backgroundColor(this.currentUser?.totp_enabled ? this.theme().badgeSuccessBg : this.theme().badgeWarningBg)
+                .borderRadius(99)
+              Text('两步验证 · 前往安全设置 →')
+                .fontSize(11).fontColor(this.theme().accentColor)
+            }
+            .alignItems(HorizontalAlign.Start).padding(14).backgroundColor(this.theme().bgCard)
+            .borderRadius(8).border({ width: 1, color: this.theme().borderColor }).layoutWeight(1)
+            .onClick(() => {
+              this.onNavigateSection('security');
+            })
+          }.width('100%')
+
+          Column({ space: 4 }) {
+            Text(this.currentUser?.username || '-')
+              .fontSize(15).fontWeight(FontWeight.Bold).fontColor(this.theme().textPrimary)
+            Text(`当前登录账号 · ${getSystemRoleLabel(this.currentUser?.role_code || this.currentUser?.role || 'user')}`)
+              .fontSize(12).fontColor(this.theme().textSecondary)
+          }
+          .width('100%').alignItems(HorizontalAlign.Start).padding(14).backgroundColor(this.theme().bgCard)
+          .borderRadius(8).border({ width: 1, color: this.theme().borderColor })
+        }
+        .width('100%')
+      }
+
+      // Accounts Directory Card (matching web/app/page.tsx)
+      Column({ space: 14 }) {
+        Row({ space: 10 }) {
+          Row({ space: 6 }) {
+            HmosSymbolIcon($r('sys.symbol.person_2'), 16, this.theme().accentColor)
+            Text(`您的集控账户中心 (${this.getFilteredAccounts().length})`)
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.theme().textPrimary)
+          }
+          .layoutWeight(1)
+
+          TextInput({ placeholder: '搜索账户名称或标识...', text: this.accountSearchQuery })
+            .height(32)
+            .width(this.breakpoint === 'sm' ? 150 : 220)
+            .fontSize(12)
+            .fontColor(this.theme().textPrimary)
+            .backgroundColor(this.theme().bgInput)
+            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .onChange((v: string) => { this.accountSearchQuery = v; })
+        }
+        .width('100%')
+
+        if (this.getFilteredAccounts().length === 0) {
+          Column({ space: 8 }) {
+            Text(this.accounts.length === 0 ? '您尚未加入任何集控账户中心' : '没有匹配的账户中心')
+              .fontSize(14)
+              .fontColor(this.theme().textSecondary)
+            if (this.accounts.length === 0 && this.currentUser?.can_create_account !== false) {
+              Button('立即创建第一个账户中心')
+                .height(34).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor).borderRadius(4)
+                .onClick(() => { this.showCreateAccountDialog = true; })
+            }
+          }
+          .width('100%')
+          .padding(32)
+          .alignItems(HorizontalAlign.Center)
+        } else {
+          Column({ space: 10 }) {
+            ForEach(this.getFilteredAccounts(), (acc: AccountSummary) => {
               Column({ space: 10 }) {
-                ForEach(this.accounts, (acc: AccountSummary) => {
-                  Row({ space: 14 }) {
-                    Column() {
-                      Text(acc.name && acc.name.length > 0 ? acc.name.substring(0, 1).toUpperCase() : 'M')
-                        .fontSize(18)
-                        .fontWeight(FontWeight.Bold)
-                        .fontColor(this.theme().accentColor)
-                    }
-                    .width(44)
-                    .height(44)
-                    .borderRadius(10)
-                    .backgroundColor(this.theme().bgAccentSubtle)
-                    .justifyContent(FlexAlign.Center)
-                    .alignItems(HorizontalAlign.Center)
-
-                    Column({ space: 4 }) {
-                      Text(acc.name)
-                        .fontSize(16)
-                        .fontWeight(FontWeight.Bold)
-                        .fontColor(this.theme().textPrimary)
-                        .maxLines(1)
-                      Row({ space: 6 }) {
-                        if (acc.slug && acc.slug.length > 0) {
-                          Text(acc.slug)
-                            .fontSize(11)
-                            .fontColor(this.theme().textSecondary)
-                            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                            .backgroundColor(this.theme().bgSubtle)
-                            .borderRadius(4)
-                        }
-                        Text(acc.is_active !== false ? '活跃' : '停用')
-                          .fontSize(11)
-                          .fontWeight(FontWeight.Medium)
-                          .fontColor(acc.is_active !== false ? this.theme().badgeSuccessFg : this.theme().badgeDangerFg)
-                          .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                          .backgroundColor(acc.is_active !== false ? this.theme().badgeSuccessBg : this.theme().badgeDangerBg)
-                          .borderRadius(99)
-                      }
-                      Text(`ID: ${acc.id}`)
-                        .fontSize(11)
-                        .fontColor(this.theme().textTertiary)
-                    }
-                    .alignItems(HorizontalAlign.Start)
-                    .layoutWeight(1)
-
-                    HmosSymbolIcon($r('sys.symbol.arrow_right'), 16, this.theme().textSecondary)
+                Row({ space: 8 }) {
+                  Column({ space: 2 }) {
+                    Text(acc.name)
+                      .fontSize(15)
+                      .fontWeight(FontWeight.Bold)
+                      .fontColor(this.theme().textPrimary)
+                    Text(`标识: ${acc.slug}`)
+                      .fontSize(11)
+                      .fontFamily('monospace')
+                      .fontColor(this.theme().textSecondary)
                   }
-                  .width('100%')
-                  .padding({ left: 18, right: 18, top: 14, bottom: 14 })
-                  .backgroundColor(this.theme().bgCard)
-                  .borderRadius(10)
-                  .border({ width: 1, color: this.theme().borderColor })
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+
+                  Text(getAccountRoleLabel(acc.role || 'owner'))
+                    .fontSize(11)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(this.theme().badgeInfoFg)
+                    .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                    .backgroundColor(this.theme().badgeInfoBg)
+                    .borderRadius(99)
+                }
+                .width('100%')
+
+                Row({ space: 8 }) {
+                  HmosIconTextButton(
+                    $r('sys.symbol.gearshape'),
+                    '基础信息',
+                    this.theme().textPrimary,
+                    this.theme().bgCard,
+                    this.theme().borderColor,
+                    () => {
+                      this.onNavigateAccountSection(acc, 'account');
+                    },
+                    32,
+                    12
+                  )
+
+                  Button({ type: ButtonType.Normal }) {
+                    Row({ space: 4 }) {
+                      Text('进入账户中心')
+                        .fontSize(12)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor('#FFFFFF')
+                      SymbolGlyph($r('sys.symbol.arrow_right'))
+                        .fontSize(13)
+                        .fontColor(['#FFFFFF'])
+                    }
+                    .justifyContent(FlexAlign.Center)
+                    .alignItems(VerticalAlign.Center)
+                  }
+                  .height(32)
+                  .layoutWeight(1)
+                  .backgroundColor(this.theme().accentColor)
+                  .borderRadius(4)
                   .onClick(() => {
                     this.onSelectAccount(acc);
                   })
-                }, (acc: AccountSummary) => `${acc.id}`)
-              }
-              .width('100%')
-            }
-
-            if (this.showCreateAccountDialog) {
-              Column({ space: 10 }) {
-                Text('创建新账户')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.theme().textPrimary)
-                Column({ space: 4 }) {
-                  Text('账户名称').fontSize(12).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '例如：北京市第一中学', text: this.newTenantName })
-                    .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.newTenantName = v; })
-                }.alignItems(HorizontalAlign.Start).width('100%')
-
-                Column({ space: 4 }) {
-                  Text('子域名标识（可选）').fontSize(12).fontColor(this.theme().textPrimary)
-                  TextInput({ placeholder: '例如：beijing-no1-high', text: this.newTenantSlug })
-                    .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                    .onChange((v: string) => { this.newTenantSlug = v; })
-                }.alignItems(HorizontalAlign.Start).width('100%')
-
-                Row({ space: 8 }) {
-                  Button('取消')
-                    .height(34).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgCard)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
-                    .onClick(() => { this.showCreateAccountDialog = false; })
-                  Button('创建')
-                    .height(34).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor)
-                    .borderRadius(4).layoutWeight(1)
-                    .onClick(async () => {
-                      if (!this.newTenantName.trim()) { return; }
-                      const r = await ApiService.get().createTenantAccount(this.newTenantName.trim(), this.newTenantSlug.trim());
-                      if (r.ok && r.data) {
-                        this.newTenantName = '';
-                        this.newTenantSlug = '';
-                        this.showCreateAccountDialog = false;
-                        this.onRefreshAccounts();
-                        const createdSummary: AccountSummary = {
-                          id: r.data.id,
-                          name: r.data.name,
-                          slug: r.data.slug,
-                          api_key: r.data.api_key,
-                          is_active: r.data.is_active,
-                          role: 'owner'
-                        };
-                        this.onSelectAccount(createdSummary);
-                      }
-                    })
-                }.width('100%')
-              }
-              .width('100%')
-              .padding(14)
-              .backgroundColor(this.theme().bgSubtle)
-              .borderRadius(8)
-              .border({ width: 1, color: this.theme().borderColor })
-            }
-
-            if (this.showJoinInviteDialog) {
-              Column({ space: 10 }) {
-                Text('使用邀请码加入')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.theme().textPrimary)
-                TextInput({ placeholder: '输入邀请码', text: this.inviteCodeInput })
-                  .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
-                  .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                  .onChange((v: string) => { this.inviteCodeInput = v; })
-                Row({ space: 8 }) {
-                  Button('取消')
-                    .height(34).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgCard)
-                    .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
-                    .onClick(() => { this.showJoinInviteDialog = false; })
-                  Button('加入账户')
-                    .height(34).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor)
-                    .borderRadius(4).layoutWeight(1)
-                    .onClick(async () => {
-                      if (!this.inviteCodeInput.trim()) { return; }
-                      const r = await ApiService.get().acceptInvitation(this.inviteCodeInput.trim());
-                      if (r.ok) {
-                        this.inviteCodeInput = '';
-                        this.showJoinInviteDialog = false;
-                        this.onRefreshAccounts();
-                      }
-                    })
-                }.width('100%')
-              }
-              .width('100%')
-              .padding(14)
-              .backgroundColor(this.theme().bgSubtle)
-              .borderRadius(8)
-              .border({ width: 1, color: this.theme().borderColor })
-            }
-
-            Row({ space: 8 }) {
-              Button({ type: ButtonType.Normal }) {
-                Row({ space: 4 }) {
-                  SymbolGlyph($r('sys.symbol.plus'))
-                    .fontSize(14)
-                    .fontColor(['#FFFFFF'])
-                  Text('创建新账户')
-                    .fontSize(13)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor('#FFFFFF')
                 }
-                .justifyContent(FlexAlign.Center)
-                .alignItems(VerticalAlign.Center)
-              }
-              .height(36)
-              .backgroundColor(this.theme().accentColor)
-              .borderRadius(4)
-              .layoutWeight(1)
-              .onClick(() => {
-                this.showCreateAccountDialog = !this.showCreateAccountDialog;
-                this.showJoinInviteDialog = false;
-              })
-
-              Button('使用邀请码加入')
-                .height(36)
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(this.theme().textPrimary)
-                .backgroundColor(this.theme().bgCard)
-                .border({ width: 1, color: this.theme().borderColor, radius: 4 })
-                .layoutWeight(1)
-                .onClick(() => {
-                  this.showJoinInviteDialog = !this.showJoinInviteDialog;
-                  this.showCreateAccountDialog = false;
-                })
-            }
-            .width('100%')
-            .margin({ top: 6 })
-
-            if (this.currentUser && this.currentUser.role === 'superadmin') {
-              Button('进入超级管理平台')
                 .width('100%')
-                .height(36)
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(this.theme().accentColor)
-                .backgroundColor(this.theme().bgAccentSubtle)
-                .borderRadius(4)
-                .onClick(() => {
-                  this.onEnterSuperAdmin();
-                })
-            }
-
-            // Certificate & Reverse QR Web Login card also available when logged in
-            this.buildCertificateAndQrSection(true)
-
-            Button('退出登录')
-              .height(32)
-              .fontSize(13)
-              .fontColor(this.theme().textSecondary)
-              .backgroundColor(Color.Transparent)
-              .onClick(() => {
-                this.onLogout();
-              })
-
-            this.buildWebFooterDisclaimer()
+              }
+              .width('100%')
+              .padding(16)
+              .backgroundColor(this.theme().bgSubtle)
+              .borderRadius(8)
+              .border({ width: 1, color: this.theme().borderColor })
+            }, (acc: AccountSummary) => acc.id)
           }
-          .width(this.breakpoint === 'sm' ? '92%' : 460)
-          .padding(this.breakpoint === 'sm' ? 24 : 36)
-          .backgroundColor(this.theme().bgCard)
-          .borderRadius(12)
-          .shadow({ radius: 24, color: '#26000000', offsetX: 0, offsetY: 8 })
-          .margin({ top: 56, bottom: 36 })
+          .width('100%')
         }
-        .width('100%')
-        .constraintSize({ minHeight: '100%' })
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
       }
       .width('100%')
-      .height('100%')
+      .padding(18)
+      .backgroundColor(this.theme().bgCard)
+      .borderRadius(8)
+      .border({ width: 1, color: this.theme().borderColor })
 
-      Row() {
-        this.buildThemeModeToggle(true)
-      }
-      .margin({
-        top: this.safeTopVp + 14,
-        right: Math.max(this.safeRightVp, this.captionRightReserveVp) + 16
-      })
+      this.buildWebFooterDisclaimer()
     }
     .width('100%')
-    .height('100%')
-    .padding({ bottom: this.safeBottomVp })
-    .backgroundColor(this.theme().loginBg)
+  }
+
+  // ==================== MY TICKETS VIEW (1:1 with web/app/tickets/page.tsx) ====================
+  @Builder
+  buildTicketsView() {
+    Column({ space: 16 }) {
+      Row({ space: 10 }) {
+        Column({ space: 4 }) {
+          Text('我的工单')
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.theme().textPrimary)
+          Text('向平台管理员提交技术支持、配额申请或问题反馈')
+            .fontSize(13)
+            .fontColor(this.theme().textSecondary)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        HmosIconTextButton(
+          $r('sys.symbol.plus'),
+          '提交新工单',
+          '#FFFFFF',
+          this.theme().accentColor,
+          Color.Transparent,
+          () => {
+            this.showCreateTicketForm = !this.showCreateTicketForm;
+          },
+          34,
+          13
+        )
+        HmosIconTextButton(
+          $r('sys.symbol.arrow_clockwise'),
+          '刷新',
+          this.theme().textPrimary,
+          this.theme().bgCard,
+          this.theme().borderColor,
+          () => {
+            this.loadMyTickets();
+          },
+          34,
+          13
+        )
+      }
+      .width('100%')
+
+      if (this.showCreateTicketForm) {
+        Column({ space: 10 }) {
+          Text('新建支持工单')
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.theme().textPrimary)
+          TextInput({ placeholder: '工单标题（简要描述问题或需求）', text: this.newTicketSubject })
+            .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
+            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .onChange((v: string) => { this.newTicketSubject = v; })
+
+          Row({ space: 8 }) {
+            Text('分类:').fontSize(12).fontColor(this.theme().textSecondary)
+            ForEach(['general', 'bug', 'quota', 'account'], (cat: string) => {
+              Button(getTicketCategoryLabel(cat))
+                .height(26).fontSize(11)
+                .fontColor(this.newTicketCategory === cat ? '#FFFFFF' : this.theme().textPrimary)
+                .backgroundColor(this.newTicketCategory === cat ? this.theme().accentColor : this.theme().bgSubtle)
+                .borderRadius(4)
+                .onClick(() => { this.newTicketCategory = cat; })
+            }, (cat: string) => cat)
+          }.width('100%')
+
+          Row({ space: 8 }) {
+            Text('优先级:').fontSize(12).fontColor(this.theme().textSecondary)
+            ForEach(['low', 'normal', 'high', 'urgent'], (pri: string) => {
+              Button(getTicketPriorityLabel(pri))
+                .height(26).fontSize(11)
+                .fontColor(this.newTicketPriority === pri ? '#FFFFFF' : this.theme().textPrimary)
+                .backgroundColor(this.newTicketPriority === pri ? this.theme().accentColor : this.theme().bgSubtle)
+                .borderRadius(4)
+                .onClick(() => { this.newTicketPriority = pri; })
+            }, (pri: string) => pri)
+          }.width('100%')
+
+          TextArea({ placeholder: '详细描述您遇到的问题或需要申请的配额...', text: this.newTicketContent })
+            .height(90).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
+            .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+            .onChange((v: string) => { this.newTicketContent = v; })
+
+          Row({ space: 8 }) {
+            Button('提交工单')
+              .height(34).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor).borderRadius(4)
+              .onClick(async () => {
+                if (!this.newTicketSubject.trim() || !this.newTicketContent.trim()) { return; }
+                const r = await ApiService.get().createTicket(
+                  this.newTicketSubject.trim(),
+                  this.newTicketCategory,
+                  this.newTicketPriority,
+                  this.newTicketContent.trim()
+                );
+                if (r.ok) {
+                  this.newTicketSubject = '';
+                  this.newTicketContent = '';
+                  this.showCreateTicketForm = false;
+                  await this.loadMyTickets();
+                }
+              })
+            Button('取消')
+              .height(34).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgSubtle)
+              .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+              .onClick(() => { this.showCreateTicketForm = false; })
+          }
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        .padding(18)
+        .backgroundColor(this.theme().bgCard)
+        .borderRadius(8)
+        .border({ width: 1, color: this.theme().accentColor })
+      }
+
+      Row({ space: 6 }) {
+        ForEach(['all', 'open', 'in_progress', 'resolved', 'closed'], (st: string) => {
+          Button(st === 'all' ? '全部状态' : getTicketStatusLabel(st))
+            .height(28).fontSize(12)
+            .fontColor(this.ticketStatusFilter === st ? '#FFFFFF' : this.theme().textPrimary)
+            .backgroundColor(this.ticketStatusFilter === st ? this.theme().accentColor : this.theme().bgSubtle)
+            .borderRadius(4)
+            .onClick(() => {
+              this.ticketStatusFilter = st;
+              this.loadMyTickets();
+            })
+        }, (st: string) => st)
+      }.width('100%')
+
+      if (this.activeTicketDetail !== null) {
+        Column({ space: 12 }) {
+          Row({ space: 8 }) {
+            Text(`[${this.activeTicketDetail.ticket_no}] ${this.activeTicketDetail.subject}`)
+              .fontSize(15).fontWeight(FontWeight.Bold).fontColor(this.theme().textPrimary).layoutWeight(1)
+            if (this.activeTicketDetail.status !== 'closed') {
+              Button('关闭工单')
+                .height(28).fontSize(12).fontColor(this.theme().dangerColor).backgroundColor(this.theme().bgSubtle)
+                .border({ width: 1, color: this.theme().borderColor, radius: 4 })
+                .onClick(async () => {
+                  if (!this.activeTicketDetail) { return; }
+                  await ApiService.get().closeTicket(this.activeTicketDetail.id);
+                  await this.openTicketDetail(this.activeTicketDetail);
+                  await this.loadMyTickets();
+                })
+            }
+            Button('返回列表')
+              .height(28).fontSize(12).fontColor(this.theme().textSecondary).backgroundColor(this.theme().bgSubtle).borderRadius(4)
+              .onClick(() => { this.activeTicketDetail = null; })
+          }.width('100%')
+
+          ForEach(this.activeTicketDetail.messages || [], (m: TicketMessageItem) => {
+            Column({ space: 4 }) {
+              Row() {
+                Text(`${m.sender_name || '用户'}${m.is_staff_reply ? ' · 平台客服' : ''}`)
+                  .fontSize(12).fontWeight(FontWeight.Bold)
+                  .fontColor(m.is_staff_reply ? this.theme().accentColor : this.theme().textPrimary)
+                  .layoutWeight(1)
+                Text(m.created_at || '')
+                  .fontSize(11).fontColor(this.theme().textSecondary)
+              }.width('100%')
+              Text(m.content)
+                .fontSize(13).fontColor(this.theme().textPrimary)
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            .padding(12)
+            .backgroundColor(m.is_staff_reply ? this.theme().bgAccentSubtle : this.theme().bgSubtle)
+            .borderRadius(6)
+          }, (m: TicketMessageItem) => m.id)
+
+          if (this.activeTicketDetail.status !== 'closed') {
+            Row({ space: 8 }) {
+              TextInput({ placeholder: '输入回复内容...', text: this.ticketReplyText })
+                .height(36).fontSize(13).fontColor(this.theme().textPrimary).backgroundColor(this.theme().bgInput)
+                .border({ width: 1, color: this.theme().borderColor, radius: 4 }).layoutWeight(1)
+                .onChange((v: string) => { this.ticketReplyText = v; })
+              Button('发送回复')
+                .height(36).fontSize(13).fontColor('#FFFFFF').backgroundColor(this.theme().accentColor).borderRadius(4)
+                .onClick(async () => {
+                  if (!this.activeTicketDetail || !this.ticketReplyText.trim()) { return; }
+                  const r = await ApiService.get().replyTicket(this.activeTicketDetail.id, this.ticketReplyText.trim());
+                  if (r.ok) {
+                    this.ticketReplyText = '';
+                    await this.openTicketDetail(this.activeTicketDetail);
+                  }
+                })
+            }.width('100%')
+          }
+        }
+        .width('100%')
+        .padding(18)
+        .backgroundColor(this.theme().bgCard)
+        .borderRadius(8)
+        .border({ width: 1, color: this.theme().accentColor })
+      }
+
+      Column({ space: 8 }) {
+        if (this.tickets.length === 0) {
+          Text('暂无工单记录')
+            .fontSize(13).fontColor(this.theme().textSecondary).padding(24)
+        } else {
+          ForEach(this.tickets, (t: TicketItem) => {
+            Row({ space: 10 }) {
+              Column({ space: 4 }) {
+                Row({ space: 6 }) {
+                  Text(t.ticket_no)
+                    .fontSize(11).fontFamily('monospace').fontColor(this.theme().textSecondary)
+                  Text(t.subject)
+                    .fontSize(14).fontWeight(FontWeight.Bold).fontColor(this.theme().textPrimary)
+                }
+                Text(`分类: ${getTicketCategoryLabel(t.category)} · 优先级: ${getTicketPriorityLabel(t.priority)} · 更新于: ${t.updated_at || t.created_at}`)
+                  .fontSize(12).fontColor(this.theme().textSecondary)
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+
+              Text(getTicketStatusLabel(t.status))
+                .fontSize(11)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(t.status === 'resolved' ? this.theme().badgeSuccessFg : this.theme().badgeInfoFg)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .backgroundColor(t.status === 'resolved' ? this.theme().badgeSuccessBg : this.theme().badgeInfoBg)
+                .borderRadius(99)
+            }
+            .width('100%')
+            .padding(12)
+            .backgroundColor(this.theme().bgSubtle)
+            .borderRadius(6)
+            .onClick(() => {
+              this.openTicketDetail(t);
+            })
+          }, (t: TicketItem) => t.id)
+        }
+      }
+      .width('100%')
+      .padding(18)
+      .backgroundColor(this.theme().bgCard)
+      .borderRadius(8)
+      .border({ width: 1, color: this.theme().borderColor })
+    }
+    .width('100%')
   }
 
   build() {
     Column() {
-      if (this.mode === 'accounts') {
-        this.buildAccountSelectionScreen()
+      if (this.lastLoadedMode !== this.mode) {
+        Row().height(0).onAppear(() => {
+          this.reloadForMode();
+        })
+      }
+
+      if (this.mode === 'user_home' || this.mode === 'accounts') {
+        this.buildUserCenterHomeView()
+      } else if (this.mode === 'tickets') {
+        this.buildTicketsView()
       } else {
         this.buildLoginScreen()
       }
     }
     .width('100%')
-    .height('100%')
   }
 }
